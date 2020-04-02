@@ -43,7 +43,8 @@ PUB Startx(SCL_PIN, SDA_PIN, I2C_HZ): okay
             if okay := i2c.setupx (SCL_PIN, SDA_PIN, I2C_HZ)    'I2C Object Started?
                 time.MSleep (1)
                 if i2c.present (SLAVE_WR)                       'Response from device?
-                    return okay
+                    if DeviceID >> 8 == core#PARTID_RESP
+                        return okay
 
     return FALSE                                                'If we got here, something went wrong
 
@@ -52,13 +53,14 @@ PUB Stop
     i2c.terminate
 
 PUB DeviceID
-
-    readReg(core#PARTID, 1, @result)
+' Get device part number/ID
+'   Returns: $15xx (xx = revision ID; can be $00..$FF)
+    readReg(core#REVID, 2, @result)
 
 PRI readReg(reg, nr_bytes, buff_addr) | cmd_packet, tmp
 '' Read num_bytes from the slave device into the address stored in buff_addr
     case reg                                                    'Basic register validation
-        $FF:
+        $00..$0A, $0C, $0D, $11, $12, $1F..$21, $FE, $FF:
             cmd_packet.byte[0] := SLAVE_WR
             cmd_packet.byte[1] := reg
             i2c.start
@@ -73,7 +75,7 @@ PRI readReg(reg, nr_bytes, buff_addr) | cmd_packet, tmp
 PRI writeReg(reg, nr_bytes, buff_addr) | cmd_packet, tmp
 '' Write num_bytes to the slave device from the address stored in buff_addr
     case reg                                                    'Basic register validation
-        $00..$FF:                                               ' Consult your device's datasheet!
+        $02..$0D, $11, $12, $21:
             cmd_packet.byte[0] := SLAVE_WR
             cmd_packet.byte[1] := reg
             i2c.start
