@@ -190,6 +190,23 @@ PUB SampleAverages(nr_samples) | tmp
     tmp := (tmp | nr_samples) & core#FIFOCONFIG_MASK
     writeReg(core#FIFOCONFIG, 1, @tmp)
 
+PUB SpO2Scale(range) | tmp
+' Set SpO2 sensor full-scale range, in nanoAmperes
+'   Valid values: 2048, 4096, 8192, 16384
+'   Any other value polls the chip and returns the current setting
+    tmp := $00
+    readReg(core#SPO2CONFIG, 1, @tmp)
+    case range
+        2048, 4096, 8192, 16384:
+            range := lookdownz(range: %00, %01, %10, %11) << core#FLD_SPO2_ADC_RGE
+        OTHER:
+            tmp := (tmp >> core#FLD_SPO2_ADC_RGE) & core#BITS_SPO2_ADC_RGE
+            return lookupz(tmp: 2048, 4096, 8192, 16384)
+
+    tmp &= core#MASK_SPO2_ADC_RGE
+    tmp := (tmp | range) & core#SPO2CONFIG_MASK
+    writeReg(core#SPO2CONFIG, 1, @tmp)
+
 PUB Temperature | int, fract, tmp
 ' Read die temperature
 '   Returns: Temperature in centi-degrees Celsius (signed)

@@ -46,6 +46,17 @@ CON
         MASK_MODE               = MODECONFIG_MASK ^ (BITS_MODE << FLD_MODE)
 
     SPO2CONFIG                  = $0A
+    SPO2CONFIG_MASK             = $7F
+        FLD_SPO2_ADC_RGE        = 7
+        FLD_SPO2_SR             = 2
+        FLD_LED_PW              = 0
+        BITS_SPO2_ADC_RGE       = %11
+        BITS_SPO2_SR            = %111
+        BITS_LED_PW             = %11
+        MASK_SPO2_ADC_RGE       = SPO2CONFIG_MASK ^ (BITS_SPO2_ADC_RGE << FLD_SPO2_ADC_RGE)
+        MASK_SPO2_SR            = SPO2CONFIG_MASK ^ (BITS_SPO2_SR << FLD_SPO2_SR)
+        MASK_LED_PW             = SPO2CONFIG_MASK ^ (BITS_LED_PW << FLD_LED_PW)
+
 ' RESERVED                      = $0B
     LED1PA                      = $0C
     LED2PA                      = $0D
