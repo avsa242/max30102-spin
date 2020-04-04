@@ -116,9 +116,35 @@ PUB FIFOUnreadSamples | rd_ptr, wr_ptr
 
     return (||( 16 + wr_ptr - rd_ptr ) // 16)
 
-PUB Interrupt
+PUB Interrupt1
 
     readReg(core#INTSTATUS1, 2, @result)
+
+PUB Interrupt2
+
+    readReg(core#INTSTATUS1, 2, @result)
+
+PUB Int1Mask(mask) | tmp
+
+    readReg(core#INTSTATUS1, 1, @tmp)
+    case mask
+        %000..%111:
+            mask <<= core#FLD_ALC_OVF
+        OTHER:
+            return tmp >> core#FLD_ALC_OVF
+
+    writeReg(core#INTSTATUS1, 1, @mask)
+
+PUB Int2Mask(mask) | tmp
+
+    readReg(core#INTSTATUS2, 1, @tmp)
+    case mask
+        %00, %10:
+            mask <<= core#FLD_DIE_TEMP_RDY_EN
+        OTHER:
+            return tmp >> core#FLD_DIE_TEMP_RDY_EN
+
+    writeReg(core#INTSTATUS2, 1, @mask)
 
 PUB IRLEDCurrent(uA) | tmp
 ' Set IR LED current limit, in microAmperes
@@ -147,8 +173,7 @@ PUB RedLEDCurrent(uA) | tmp
 ' Set Red LED current limit, in microAmperes
 '   Valid values: 0..51000
 '   Any other value polls the chip and returns the current setting
-'   NOTE: Per the datasheet, actual measured LED current for each part can vary wideley due to trimming methodolo
-gy
+'   NOTE: Per the datasheet, actual measured LED current for each part can vary wideley due to trimming methodology
     tmp := $00
     readReg(core#LED1PA, 1, @tmp)
     case uA
