@@ -59,6 +59,23 @@ PUB Stop
 ' Put any other housekeeping code here required/recommended by your device before shutting down
     i2c.terminate
 
+PUB ADCRes(bits) | tmp
+' Set sensor ADC resolution, in bits
+'   Valid values: *15, 16, 17, 18
+'   Any other value polls the chip and returns the current setting
+    tmp := $00
+    readReg(core#SPO2CONFIG, 1, @tmp)
+    case bits
+        15, 16, 17, 18:
+            bits := lookdownz(bits: %00, %01, %10, %11) & core#BITS_LED_PW
+        OTHER:
+            tmp &= core#BITS_LED_PW
+            return lookupz(tmp: 15, 16, 17, 18)
+
+    tmp &= core#MASK_LED_PW
+    tmp := (tmp | bits) & core#SPO2CONFIG_MASK
+    writeReg(core#SPO2CONFIG, 1, @tmp)
+
 PUB DataOverrun
 ' Flag indicating data overrun
 '   Returns: Number of FIFO samples overrun/lost (0..31)
@@ -119,15 +136,26 @@ PUB FIFOUnreadSamples | rd_ptr, wr_ptr
     return (||( 16 + wr_ptr - rd_ptr ) // 16)
 
 PUB Interrupt1
-
+' Get interrupt 1 status
+'   Bits 210
+'       2: FIFO interrupt level reached (set using FIFOIntLevel()
+'       1: New data sample ready
+'       0: Ambient light cancellation overflow (ambient light is affecting reading)
     readReg(core#INTSTATUS1, 2, @result)
+    result >>= core#FLD_ALC_OVF
 
 PUB Interrupt2
-
-    readReg(core#INTSTATUS1, 2, @result)
+' Get interrupt 2 status
+'   1: Die temperature measurement ready
+    readReg(core#INTSTATUS2, 2, @result)
 
 PUB Int1Mask(mask) | tmp
-
+' Set interrupt 1 mask
+'   Bits 210
+'       2: FIFO interrupt level reached (set using FIFOIntLevel()
+'       1: New data sample ready
+'       0: Ambient light cancellation overflow (ambient light is affecting reading)
+'   Any other value polls the chip and returns the current setting
     readReg(core#INTSTATUS1, 1, @tmp)
     case mask
         %000..%111:
@@ -138,7 +166,11 @@ PUB Int1Mask(mask) | tmp
     writeReg(core#INTSTATUS1, 1, @mask)
 
 PUB Int2Mask(mask) | tmp
-
+' Set interrupt 2 mask
+'   Valid values:
+'       %00: Disabled
+'       %10: Die temperature ready interrupt enabled
+'   Any other value polls the chip and returns the current setting
     readReg(core#INTSTATUS2, 1, @tmp)
     case mask
         %00, %10:
