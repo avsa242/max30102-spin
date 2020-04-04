@@ -190,6 +190,23 @@ PUB SampleAverages(nr_samples) | tmp
     tmp := (tmp | nr_samples) & core#FIFOCONFIG_MASK
     writeReg(core#FIFOCONFIG, 1, @tmp)
 
+PUB SpO2SampleRate(Hz) | tmp
+' Set SpO2 sensor sample rate, in Hz
+'   Valid values: 50, 100, 200, 400, 800, 1000, 1600, 3200
+'   Any other value polls the chip and returns the current setting
+    tmp := $00
+    readReg(core#SPO2CONFIG, 1, @tmp)
+    case Hz
+        50, 100, 200, 400, 800, 1000, 1600, 3200:
+            Hz := lookdownz(Hz: 50, 100, 200, 400, 800, 1000, 1600, 3200) << core#FLD_SPO2_SR
+        OTHER:
+            tmp := (tmp >> core#FLD_SPO2_SR) & core#BITS_SPO2_SR
+            return lookupz(tmp: 50, 100, 200, 400, 800, 1000, 1600, 3200)
+
+    tmp &= core#MASK_SPO2_SR
+    tmp := (tmp | Hz) & core#SPO2CONFIG_MASK
+    writeReg(core#SPO2CONFIG, 1, @tmp)
+
 PUB SpO2Scale(range) | tmp
 ' Set SpO2 sensor full-scale range, in nanoAmperes
 '   Valid values: 2048, 4096, 8192, 16384
