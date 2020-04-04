@@ -17,9 +17,26 @@ CON
 
 
     INTSTATUS1                  = $00
+    INTSTATUS1_MASK             = $E1
+        FLD_A_FULL              = 7
+        FLD_PPG_RDY             = 6
+        FLD_ALC_OVF             = 5
+        FLD_PWR_RDY             = 0
+
     INTSTATUS2                  = $01
+    INTSTATUS2_MASK             = $02
+        FLD_DIE_TEMP_RDY        = 1
+
     INTENABLE1                  = $02
+    INTENABLE1_MASK             = $E0
+        FLD_A_FULL_EN           = 7
+        FLD_PPG_RDY_EN          = 6
+        FLD_ALC_OVF_EN          = 5
+
     INTENABLE2                  = $03
+    INTENABLE2_MASK             = $02
+        FLD_DIE_TEMP_RDY_EN     = 1
+
     FIFOWRITEPTR                = $04
     OVERFLOWCNT                 = $05
     FIFOREADPTR                 = $06

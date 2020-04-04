@@ -50,6 +50,7 @@ PUB Startx(SCL_PIN, SDA_PIN, I2C_HZ): okay
                 time.MSleep (1)
                 if i2c.present (SLAVE_WR)                       'Response from device?
                     if DeviceID >> 8 == core#PARTID_RESP
+                        Reset
                         return okay
 
     return FALSE                                                'If we got here, something went wrong
@@ -60,6 +61,7 @@ PUB Stop
 
 PUB DataOverrun
 ' Flag indicating data overrun
+'   Returns: Number of FIFO samples overrun/lost (0..31)
     readReg(core#OVERFLOWCNT, 1, @result)
 
 PUB DeviceID
