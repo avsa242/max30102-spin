@@ -67,6 +67,22 @@ PUB DeviceID
 '   Returns: $15xx (xx = revision ID; can be $00..$FF)
     readReg(core#REVID, 2, @result)
 
+PUB FIFOIntLevel(samples) | tmp
+' Set number of unread samples in FIFO required to assert an interrupt
+'   Valid values: 17..32
+'   Any other value polls the chip and returns the current setting
+    tmp := $00
+    readReg(core#FIFOCONFIG, 1, @tmp)
+    case samples
+        17..32:
+            samples := 32-samples
+        OTHER:
+            tmp &= core#BITS_FIFO_A_FULL
+
+    tmp &= core#MASK_FIFO_A_FULL
+    tmp := (tmp | samples) & core#FIFOCONFIG_MASK
+    writeReg(core#FIFOCONFIG, 1, @tmp)
+
 PUB FIFORead(ptr_data) | tmp[2]
 
     readReg(core#FIFODATA, 6, @tmp)
@@ -74,6 +90,24 @@ PUB FIFORead(ptr_data) | tmp[2]
     _red_sample := tmp.byte[3] << 16 | tmp.byte[4] << 8 | tmp.byte[5]
     long[ptr_data][0] := _ir_sample
     long[ptr_data][1] := _red_sample
+
+PUB FIFORollover(enabled) | tmp
+' Enable FIFO data rollover
+'   Valid values:
+'       TRUE (-1 or 1): If FIFO becomes completely filled, new data will overwrite old data (oldest data first)
+'       FALSE (0): If FIFO becomes completely filled, it won't be updated until new data is read
+    tmp := $00
+    readReg(core#FIFOCONFIG, 1, @tmp)
+    case ||enabled
+        0, 1:
+            enabled := ||enabled << core#FLD_FIFO_ROLLOVER_EN
+        OTHER:
+            tmp := (tmp >> core#FLD_FIFO_ROLLOVER_EN) & %1
+            return tmp * TRUE
+
+    tmp &= core#MASK_FIFO_ROLLOVER_EN
+    tmp := (tmp | enabled) & core#FIFOCONFIG_MASK
+    writeReg(core#FIFOCONFIG, 1, @tmp)
 
 PUB FIFOUnreadSamples | rd_ptr, wr_ptr
 

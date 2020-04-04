@@ -31,9 +31,10 @@ CON
         FLD_FIFO_ROLLOVER_EN    = 4
         FLD_FIFO_A_FULL         = 0
         BITS_SMP_AVE            = %111
+        BITS_FIFO_A_FULL        = %1111
         MASK_SMP_AVE            = FIFOCONFIG_MASK ^ (BITS_SMP_AVE << FLD_SMP_AVE)
         MASK_FIFO_ROLLOVER_EN   = FIFOCONFIG_MASK ^ (1 << FLD_FIFO_ROLLOVER_EN)
-        MASK_FIFO_A_FULL        = FIFOCONFIG_MASK ^ (1 << FLD_FIFO_A_FULL)
+        MASK_FIFO_A_FULL        = FIFOCONFIG_MASK ^ (BITS_FIFO_A_FULL << FLD_FIFO_A_FULL)
 
     MODECONFIG                  = $09
     MODECONFIG_MASK             = $C7
