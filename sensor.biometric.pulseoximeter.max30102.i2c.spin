@@ -99,7 +99,12 @@ PUB RedLEDCurrent(uA) | tmp
     writeReg(core#LED1PA, 1, @uA)
 
 PUB OpMode(mode) | tmp
-
+' Set operation mode
+'   Valid values:
+'       HR (2): Heart-rate mode
+'       SPO2 (3): SpO2 mode
+'       MULTI_LED (7): TBD
+'   Any other value polls the chip and returns the current setting
     tmp := $00
     readReg(core#MODECONFIG, 1, @tmp)
     case mode
@@ -110,6 +115,24 @@ PUB OpMode(mode) | tmp
     tmp &= core#MASK_MODE
     tmp := (tmp | mode) & core#MODECONFIG_MASK
     writeReg(core#MODECONFIG, 1, @tmp)
+
+PUB Powered(enabled) | tmp
+' Enable sensor power
+    tmp := $00
+    readReg(core#MODECONFIG, 1, @tmp)
+    case ||enabled
+        0, 1:
+            enabled := ||enabled << core#FLD_SHDN
+        OTHER:
+
+    tmp &= core#MASK_SHDN
+    tmp := (tmp | enabled) & core#MODECONFIG_MASK
+    writeReg(core#MODECONFIG, 1, @tmp)
+
+PUB Reset
+' Perform soft-reset
+    result := 1 << core#FLD_RESET
+    writeReg(core#MODECONFIG, 1, @result)
 
 PUB Temperature | int, fract, tmp
 ' Read die temperature
