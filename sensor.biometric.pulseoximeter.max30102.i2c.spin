@@ -58,6 +58,10 @@ PUB Stop
 ' Put any other housekeeping code here required/recommended by your device before shutting down
     i2c.terminate
 
+PUB DataOverrun
+' Flag indicating data overrun
+    readReg(core#OVERFLOWCNT, 1, @result)
+
 PUB DeviceID
 ' Get device part number/ID
 '   Returns: $15xx (xx = revision ID; can be $00..$FF)
