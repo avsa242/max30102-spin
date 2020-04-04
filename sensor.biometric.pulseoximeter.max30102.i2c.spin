@@ -121,6 +121,17 @@ PUB Interrupt
     readReg(core#INTSTATUS1, 2, @result)
 
 PUB IRLEDCurrent(uA) | tmp
+' Set IR LED current limit, in microAmperes
+'   Valid values: 0..51000
+'   Any other value polls the chip and returns the current setting
+'   NOTE: Per the datasheet, actual measured LED current for each part can vary wideley due to trimming methodology
+    tmp := $00
+    readReg(core#LED2PA, 1, @tmp)
+    case uA
+        0..51_000:
+            uA /= 200
+        OTHER:
+            return tmp * 200
 
     writeReg(core#LED2PA, 1, @uA)
 
@@ -133,6 +144,18 @@ PUB LastRed
     return _red_sample
 
 PUB RedLEDCurrent(uA) | tmp
+' Set Red LED current limit, in microAmperes
+'   Valid values: 0..51000
+'   Any other value polls the chip and returns the current setting
+'   NOTE: Per the datasheet, actual measured LED current for each part can vary wideley due to trimming methodolo
+gy
+    tmp := $00
+    readReg(core#LED1PA, 1, @tmp)
+    case uA
+        0..51_000:
+            uA /= 200
+        OTHER:
+            return tmp * 200
 
     writeReg(core#LED1PA, 1, @uA)
 
