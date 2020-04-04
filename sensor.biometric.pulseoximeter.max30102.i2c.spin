@@ -138,6 +138,24 @@ PUB Reset
     result := 1 << core#FLD_RESET
     writeReg(core#MODECONFIG, 1, @result)
 
+PUB SampleAverages(nr_samples) | tmp
+' Set averaging used per FIFO sample (number of samples)
+'   Valid values: 1, 2, 4, 8, 16, 32
+'   Any other value polls the chip and returns the current setting
+'   NOTE: A setting of 1 effectively disables averging
+    tmp := $00
+    readReg(core#FIFOCONFIG, 1, @tmp)
+    case nr_samples
+        1, 2, 4, 8, 16, 32:
+            nr_samples := lookdownz(nr_samples: 1, 2, 4, 8, 16, 32) << core#FLD_SMP_AVE
+        OTHER:
+            tmp := (tmp >> core#FLD_SMP_AVE) & core#BITS_SMP_AVE
+            return lookupz(tmp: 1, 2, 4, 8, 16, 32, 32, 32)
+
+    tmp &= core#MASK_SMP_AVE
+    tmp := (tmp | nr_samples) & core#FIFOCONFIG_MASK
+    writeReg(core#FIFOCONFIG, 1, @tmp)
+
 PUB Temperature | int, fract, tmp
 ' Read die temperature
 '   Returns: Temperature in centi-degrees Celsius (signed)
