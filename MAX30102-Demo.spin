@@ -1,11 +1,11 @@
 {
     --------------------------------------------
-    Filename: MAX30102-Test.spin
-    Author:
-    Description:
+    Filename: MAX30102-Demo.spin
+    Author: Jesse Burt
+    Description: Demo of the MAX30102 driver
     Copyright (c) 2020
     Started Apr 02, 2020
-    Updated Apr 02, 2020
+    Updated Apr 04, 2020
     See end of file for terms of use.
     --------------------------------------------
 }
@@ -36,13 +36,24 @@ VAR
 
     byte _ser_cog
 
-PUB Main
+PUB Main | tmp[2], samples
 
     Setup
-    ser.position(0, 5)
+    ser.position(0, 2)
     ser.hex(max30102.DeviceID, 8)
+    max30102.OpMode(max30102#SPO2)
+    max30102.IRLEDCurrent($24)
+    max30102.RedLEDCurrent($24)
 
-    FlashLED(LED, 100)
+    repeat
+        max30102.FIFORead(@tmp)
+
+        ser.position(0, 5)
+        ser.hex(max30102.LastIR, 8)
+        ser.char(" ")
+        ser.hex(max30102.LastRed, 8)
+
+   FlashLED(LED, 100)
 
 PUB Setup
 

@@ -1,11 +1,11 @@
 {
     --------------------------------------------
     Filename: sensor.biometric.pulseoximeter.max30102.i2c.spin
-    Author:
-    Description:
+    Author: Jesse Burt
+    Description: Drive for MAX30102 pulse-oximeter/heart-rate sensor
     Copyright (c) 2020
     Started Apr 02, 2020
-    Updated Apr 02, 2020
+    Updated Apr 04, 2020
     See end of file for terms of use.
     --------------------------------------------
 }
@@ -20,8 +20,14 @@ CON
     DEF_HZ            = 400_000
     I2C_MAX_FREQ      = core#I2C_MAX_FREQ
 
+' Operating modes
+    HR                  = %010
+    SPO2                = %011
+    MULTI_LED           = %111
+
 VAR
 
+    long _ir_sample, _red_sample
 
 OBJ
 
@@ -56,6 +62,70 @@ PUB DeviceID
 ' Get device part number/ID
 '   Returns: $15xx (xx = revision ID; can be $00..$FF)
     readReg(core#REVID, 2, @result)
+
+PUB FIFORead(ptr_data) | tmp[2]
+
+    readReg(core#FIFODATA, 6, @tmp)
+    _ir_sample := tmp.byte[0] << 16 | tmp.byte[1] << 8 | tmp.byte[2]
+    _red_sample := tmp.byte[3] << 16 | tmp.byte[4] << 8 | tmp.byte[5]
+    long[ptr_data][0] := _ir_sample
+    long[ptr_data][1] := _red_sample
+
+PUB FIFOUnreadSamples | rd_ptr, wr_ptr
+
+    readReg(core#FIFOWRITEPTR, 1, @wr_ptr)
+    readReg(core#FIFOREADPTR, 1, @rd_ptr)
+
+    return (||( 16 + wr_ptr - rd_ptr ) // 16)
+
+PUB Interrupt
+
+    readReg(core#INTSTATUS1, 2, @result)
+
+PUB IRLEDCurrent(uA) | tmp
+
+    writeReg(core#LED2PA, 1, @uA)
+
+PUB LastIR
+
+    return _ir_sample
+
+PUB LastRed
+
+    return _red_sample
+
+PUB RedLEDCurrent(uA) | tmp
+
+    writeReg(core#LED1PA, 1, @uA)
+
+PUB OpMode(mode) | tmp
+
+    tmp := $00
+    readReg(core#MODECONFIG, 1, @tmp)
+    case mode
+        HR, SPO2, MULTI_LED:
+        OTHER:
+            return tmp & core#BITS_MODE
+
+    tmp &= core#MASK_MODE
+    tmp := (tmp | mode) & core#MODECONFIG_MASK
+    writeReg(core#MODECONFIG, 1, @tmp)
+
+PUB Temperature | int, fract, tmp
+' Read die temperature
+'   Returns: Temperature in centi-degrees Celsius (signed)
+    int := fract := 0
+    tmp := %1
+    writeReg(core#DIETEMPCONFIG, 1, @tmp)                       ' Trigger a measurement
+
+    readReg(core#DIETEMP_INT, 1, @int)                          ' LSB = 1C (signed 8b)
+    readReg(core#DIETEMP_FRACT, 1, @fract)                      ' LSB = +0.0625C (always additive)
+
+    ~int
+    int *= 1_0000                                               ' Scale up to
+    fract *= 0_0625                                             '   preserve precision
+
+    return (int + fract) / 100                                  ' Scale back down to centidegrees
 
 PRI readReg(reg, nr_bytes, buff_addr) | cmd_packet, tmp
 '' Read num_bytes from the slave device into the address stored in buff_addr

@@ -25,7 +25,16 @@ CON
     FIFOREADPTR         = $06
     FIFODATA            = $07
     FIFOCONFIG          = $08
+
     MODECONFIG          = $09
+    MODECONFIG_MASK     = $C7
+        FLD_SHDN        = 7
+        FLD_RESET       = 6
+        FLD_MODE        = 0
+        BITS_MODE       = %111
+        MASK_SHDN       = MODECONFIG_MASK ^ (1 << FLD_SHDN)
+        MASK_MODE       = MODECONFIG_MASK ^ (BITS_MODE << FLD_MODE)
+
     SPO2CONFIG          = $0A
 ' RESERVED              = $0B
     LED1PA              = $0C
