@@ -2,10 +2,10 @@
     --------------------------------------------
     Filename: sensor.biometric.pulseoximeter.max30102.i2c.spin
     Author: Jesse Burt
-    Description: Drive for MAX30102 pulse-oximeter/heart-rate sensor
+    Description: Driver for the MAX30102 pulse-oximeter/heart-rate sensor
     Copyright (c) 2020
     Started Apr 02, 2020
-    Updated Apr 04, 2020
+    Updated Jun 30, 2020
     See end of file for terms of use.
     --------------------------------------------
 }
@@ -32,7 +32,7 @@ VAR
 OBJ
 
     i2c : "com.i2c"                                             'PASM I2C Driver
-    core: "core.con.max30102.spin"                           'File containing your device's register set
+    core: "core.con.max30102.spin"
     time: "time"                                                'Basic timing functions
 
 PUB Null
@@ -88,7 +88,7 @@ PUB DeviceID
 
 PUB FIFOIntLevel(samples) | tmp
 ' Set number of unread samples in FIFO required to assert an interrupt
-'   Valid values: 17..32
+'   Valid values: 17..*32
 '   Any other value polls the chip and returns the current setting
     tmp := $00
     readReg(core#FIFOCONFIG, 1, @tmp)
@@ -103,7 +103,7 @@ PUB FIFOIntLevel(samples) | tmp
     writeReg(core#FIFOCONFIG, 1, @tmp)
 
 PUB FIFORead(ptr_data) | tmp[2]
-
+' Read PPG data from the FIFO
     readReg(core#FIFODATA, 6, @tmp)
     _ir_sample := tmp.byte[0] << 16 | tmp.byte[1] << 8 | tmp.byte[2]
     _red_sample := tmp.byte[3] << 16 | tmp.byte[4] << 8 | tmp.byte[5]
@@ -114,7 +114,7 @@ PUB FIFORollover(enabled) | tmp
 ' Enable FIFO data rollover
 '   Valid values:
 '       TRUE (-1 or 1): If FIFO becomes completely filled, new data will overwrite old data (oldest data first)
-'       FALSE (0): If FIFO becomes completely filled, it won't be updated until new data is read
+'      *FALSE (0): If FIFO becomes completely filled, it won't be updated until new data is read
     tmp := $00
     readReg(core#FIFOCONFIG, 1, @tmp)
     case ||enabled
@@ -128,8 +128,14 @@ PUB FIFORollover(enabled) | tmp
     tmp := (tmp | enabled) & core#FIFOCONFIG_MASK
     writeReg(core#FIFOCONFIG, 1, @tmp)
 
-PUB FIFOUnreadSamples | rd_ptr, wr_ptr
+PUB FIFOFull
+' Flag indicating FIFO is full
+'   Returns: TRUE (-1) if full, FALSE otherwise
+    result := ((Interrupt1 >> 2) & 1) * TRUE
 
+PUB FIFOUnreadSamples | rd_ptr, wr_ptr
+' Number of undread samples in FIFO
+'   Returns: Integer
     readReg(core#FIFOWRITEPTR, 1, @wr_ptr)
     readReg(core#FIFOREADPTR, 1, @rd_ptr)
 
@@ -155,36 +161,38 @@ PUB Int1Mask(mask) | tmp
 '       2: FIFO interrupt level reached (set using FIFOIntLevel()
 '       1: New data sample ready
 '       0: Ambient light cancellation overflow (ambient light is affecting reading)
+'       Default: %000
 '   Any other value polls the chip and returns the current setting
-    readReg(core#INTSTATUS1, 1, @tmp)
+    readReg(core#INTENABLE1, 1, @tmp)
     case mask
         %000..%111:
             mask <<= core#FLD_ALC_OVF
         OTHER:
             return tmp >> core#FLD_ALC_OVF
 
-    writeReg(core#INTSTATUS1, 1, @mask)
+    writeReg(core#INTENABLE1, 1, @mask)
 
 PUB Int2Mask(mask) | tmp
 ' Set interrupt 2 mask
 '   Valid values:
 '       %00: Disabled
 '       %10: Die temperature ready interrupt enabled
+'       Default: %00
 '   Any other value polls the chip and returns the current setting
-    readReg(core#INTSTATUS2, 1, @tmp)
+    readReg(core#INTENABLE2, 1, @tmp)
     case mask
         %00, %10:
             mask <<= core#FLD_DIE_TEMP_RDY_EN
         OTHER:
             return tmp >> core#FLD_DIE_TEMP_RDY_EN
 
-    writeReg(core#INTSTATUS2, 1, @mask)
+    writeReg(core#INTENABLE2, 1, @mask)
 
 PUB IRLEDCurrent(uA) | tmp
 ' Set IR LED current limit, in microAmperes
-'   Valid values: 0..51000
+'   Valid values: 0..51000 (default: 0)
 '   Any other value polls the chip and returns the current setting
-'   NOTE: Per the datasheet, actual measured LED current for each part can vary wideley due to trimming methodology
+'   NOTE: Per the datasheet, actual measured LED current for each part can vary widely due to trimming methodology
     tmp := $00
     readReg(core#LED2PA, 1, @tmp)
     case uA
@@ -196,18 +204,23 @@ PUB IRLEDCurrent(uA) | tmp
     writeReg(core#LED2PA, 1, @uA)
 
 PUB LastIR
-
+' Return most recent IR sample data
     return _ir_sample
 
 PUB LastRed
-
+' Return most recent RED sample data
     return _red_sample
+
+PUB PPGDataReady
+' Flag indicating an unread PPG data sample is ready
+'   Returns: TRUE (-1) if sample ready, FALSE otherwise
+    result := ((Interrupt1 >> 1) & 1) * TRUE
 
 PUB RedLEDCurrent(uA) | tmp
 ' Set Red LED current limit, in microAmperes
-'   Valid values: 0..51000
+'   Valid values: 0..51000 (default: 0)
 '   Any other value polls the chip and returns the current setting
-'   NOTE: Per the datasheet, actual measured LED current for each part can vary wideley due to trimming methodology
+'   NOTE: Per the datasheet, actual measured LED current for each part can vary widely due to trimming methodology
     tmp := $00
     readReg(core#LED1PA, 1, @tmp)
     case uA
@@ -238,12 +251,18 @@ PUB OpMode(mode) | tmp
 
 PUB Powered(enabled) | tmp
 ' Enable sensor power
+'   Valid values: TRUE (-1 or 1), FALSE (0)
+'   Any other value polls the chip and returns the current setting
+'   NOTE: When powered down, all settings are retained by the sensor,
+'       and all interrupts are cleared.
     tmp := $00
     readReg(core#MODECONFIG, 1, @tmp)
     case ||enabled
         0, 1:
             enabled := ||enabled << core#FLD_SHDN
         OTHER:
+            result := ((tmp >> core#FLD_SHDN) & 1) * TRUE
+            return
 
     tmp &= core#MASK_SHDN
     tmp := (tmp | enabled) & core#MODECONFIG_MASK
@@ -256,7 +275,7 @@ PUB Reset
 
 PUB SampleAverages(nr_samples) | tmp
 ' Set averaging used per FIFO sample (number of samples)
-'   Valid values: 1, 2, 4, 8, 16, 32
+'   Valid values: *1, 2, 4, 8, 16, 32
 '   Any other value polls the chip and returns the current setting
 '   NOTE: A setting of 1 effectively disables averging
     tmp := $00
@@ -274,7 +293,7 @@ PUB SampleAverages(nr_samples) | tmp
 
 PUB SpO2SampleRate(Hz) | tmp
 ' Set SpO2 sensor sample rate, in Hz
-'   Valid values: 50, 100, 200, 400, 800, 1000, 1600, 3200
+'   Valid values: *50, 100, 200, 400, 800, 1000, 1600, 3200
 '   Any other value polls the chip and returns the current setting
     tmp := $00
     readReg(core#SPO2CONFIG, 1, @tmp)
@@ -291,7 +310,7 @@ PUB SpO2SampleRate(Hz) | tmp
 
 PUB SpO2Scale(range) | tmp
 ' Set SpO2 sensor full-scale range, in nanoAmperes
-'   Valid values: 2048, 4096, 8192, 16384
+'   Valid values: *2048, 4096, 8192, 16384
 '   Any other value polls the chip and returns the current setting
     tmp := $00
     readReg(core#SPO2CONFIG, 1, @tmp)
