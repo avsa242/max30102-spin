@@ -105,8 +105,8 @@ PUB FIFOIntLevel(samples) | tmp
 PUB FIFORead(ptr_data) | tmp[2]
 ' Read PPG data from the FIFO
     readReg(core#FIFODATA, 6, @tmp)
-    _ir_sample := tmp.byte[0] << 16 | tmp.byte[1] << 8 | tmp.byte[2]
-    _red_sample := tmp.byte[3] << 16 | tmp.byte[4] << 8 | tmp.byte[5]
+    _ir_sample := (tmp.byte[0] << 16 | tmp.byte[1] << 8 | tmp.byte[2]) & $3FFFF
+    _red_sample := (tmp.byte[3] << 16 | tmp.byte[4] << 8 | tmp.byte[5]) & $3FFFF
     long[ptr_data][0] := _ir_sample
     long[ptr_data][1] := _red_sample
 
@@ -259,7 +259,7 @@ PUB Powered(enabled) | tmp
     readReg(core#MODECONFIG, 1, @tmp)
     case ||enabled
         0, 1:
-            enabled := ||enabled << core#FLD_SHDN
+            enabled := (||(enabled) ^ 1) << core#FLD_SHDN
         OTHER:
             result := ((tmp >> core#FLD_SHDN) & 1) * TRUE
             return
@@ -316,7 +316,7 @@ PUB SpO2Scale(range) | tmp
     readReg(core#SPO2CONFIG, 1, @tmp)
     case range
         2048, 4096, 8192, 16384:
-            range := lookdownz(range: %00, %01, %10, %11) << core#FLD_SPO2_ADC_RGE
+            range := lookdownz(range: 2048, 4096, 8192, 16384) << core#FLD_SPO2_ADC_RGE
         OTHER:
             tmp := (tmp >> core#FLD_SPO2_ADC_RGE) & core#BITS_SPO2_ADC_RGE
             return lookupz(tmp: 2048, 4096, 8192, 16384)

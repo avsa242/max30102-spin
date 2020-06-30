@@ -64,7 +64,7 @@ CON
 
     SPO2CONFIG                  = $0A
     SPO2CONFIG_MASK             = $7F
-        FLD_SPO2_ADC_RGE        = 7
+        FLD_SPO2_ADC_RGE        = 5
         FLD_SPO2_SR             = 2
         FLD_LED_PW              = 0
         BITS_SPO2_ADC_RGE       = %11
