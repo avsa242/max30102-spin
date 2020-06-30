@@ -51,6 +51,7 @@ PUB Startx(SCL_PIN, SDA_PIN, I2C_HZ): okay
                 if i2c.present (SLAVE_WR)                       'Response from device?
                     if DeviceID >> 8 == core#PARTID_RESP
                         Reset
+                        Powered(TRUE)
                         return okay
 
     return FALSE                                                'If we got here, something went wrong
