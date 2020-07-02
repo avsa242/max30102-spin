@@ -6,7 +6,7 @@
         Displays an auto-adjusting chart of
         SpO2 and HR data (raw ADC counts only)
     Copyright (c) 2020
-    Started Apr 02, 2020
+    Started Jun 30, 2020
     Updated Jul 1, 2020
     See end of file for terms of use.
     --------------------------------------------
@@ -14,24 +14,24 @@
 
 CON
 
-    _clkmode    = cfg#_clkmode
-    _xinfreq    = cfg#_xinfreq
+    _xtlfreq    = cfg._xtlfreq
+    _clkfreq    = 250_000_000
 
 ' -- User-modifiable constants
-    SCL_PIN     = 0
-    SDA_PIN     = 1
+    SCL_PIN     = 16
+    SDA_PIN     = 18
     I2C_HZ      = 400_000
 
-    SER_RX      = cfg#SER_RX_DEF
-    SER_TX      = cfg#SER_TX_DEF
-    SER_BAUD    = 115_200
-    LED         = cfg#LED1
-    VGA_PINGROUP= 2                                         ' 0, 1, 2, 3 (VGA pin base = pingroup * 8)
+    SER_RX      = cfg.SER_RX
+    SER_TX      = cfg.SER_TX
+    SER_BAUD    = 2_000_000
+    LED         = cfg.LED1
+    VGA_BASEPIN = 0
 ' --
 
-    WIDTH       = vga#DISP_WIDTH
-    HEIGHT      = vga#DISP_HEIGHT
-    BPL         = WIDTH * vga#BYTESPERPX
+    WIDTH       = 320
+    HEIGHT      = 240
+    BPL         = vga.BYTESPERLN
     BUFFSZ      = (WIDTH * HEIGHT)
     XMAX        = WIDTH - 1
     YMAX        = HEIGHT - 1
@@ -40,12 +40,10 @@ CON
 
 OBJ
 
-    cfg         : "core.con.boardcfg.quickstart-hib"
+    cfg         : "core.con.boardcfg.p2eval"
     ser         : "com.serial.terminal.ansi"
-    io          : "io"
-    time        : "time"
-    max30102    : "sensor.bio.pulseoximeter.max30102.i2c"
-    vga         : "display.vga.bitmap.160x120"
+    max30102    : "sensor.bio.pulseoximeter.max30102.i2c.spin2"
+    vga         : "display.vga.bitmap-8bpp"
     fnt         : "font.5x8"
 
 VAR
@@ -53,40 +51,44 @@ VAR
     long _settings_changed
     long _i_red, _i_ir, _ir_offset, _red_offset, _div
     long _red_data, _ir_data, _last_red, _last_ir, _die_temp
-    long _key_stack[50], _acq_stack[50]
+
+    long _palette[256]
+    long _key_stack[100], _acq_stack[100]
+
     byte _max30102_cog
     byte _framebuff[BUFFSZ]
 
-PUB Main | x
+PUB Main() | x
 
-    Setup
+    vga.SetTimings(10, 33, 16, 96, 48, 640)
+    Setup()
 
-    vga.fgcolor(vga#MAX_COLOR)
+    vga.fgcolor(vga.MAX_COLOR)
 
     repeat
         repeat x from 0 to XMAX
-            vga.line(x-1, YMAX-_last_ir, x, YMAX-_ir_data, vga#MAX_COLOR)
+            vga.line(x-1, YMAX-_last_ir, x, YMAX-_ir_data, vga.MAX_COLOR)
             vga.line(x-1, YMAX-_last_red, x, YMAX-_red_data, %%300)
-'            vga.plot(x, _ir_data #> 0, vga#MAX_COLOR)
-'            vga.plot(x, _red_data #> 0, %%300)
+'            vga.plot(x, _ir_data #> 0, vga.MAX_COLOR)
+'            vga.plot(x, _red_data #> 0, 63)
             if _settings_changed
-                displaysettings
+                displaysettings()
                 quit                                        ' If settings changed, start a new loop
-            time.msleep(10)
+            waitms(15)
             vga.box(x+1, 0, x+5, YMAX, 0, TRUE)             ' Erase the chart ahead of the current plot
 
 ' Scroll View
     repeat
-        vga.waitvsync
-        vga.plot(XMAX-2, _ir_data #> 0, vga#MAX_COLOR)
-        vga.plot(XMAX-2, _red_data #> 0, %%300)
+        vga.waitvsync()
+        vga.plot(XMAX-2, _ir_data #> 0, vga.MAX_COLOR)
+        vga.plot(XMAX-2, _red_data #> 0, 63)
         vga.scrollleft(0, 0, XMAX, YMAX)
         if _settings_changed
-            displaysettings
+            displaysettings()
 
    flashled(LED, 100)
 
-PUB DisplaySettings
+PUB DisplaySettings()
 
     ser.position(0, 7)
     ser.printf(string("IR: %d, Red: %d     \n"), max30102.lastir, max30102.lastred, 0, 0, 0, 0)
@@ -98,22 +100,22 @@ PUB DisplaySettings
     ser.printf(string("Die temp: %d\n"), _die_temp, 0, 0, 0, 0, 0)
     _settings_changed := FALSE
 
-PUB cog_acquire | tmp[2], irlc, irhc, rlc, rhc
+PUB cog_acquire() | tmp[2], irlc, irhc, rlc, rhc
 
-    repeat until _max30102_cog := max30102.Startx(SCL_PIN, SDA_PIN, I2C_HZ)
+    repeat until _max30102_cog := max30102.start(SCL_PIN, SDA_PIN, I2C_HZ)
 
 ' Initial settings
     _i_red := 4_000                                         ' Red LED current (uA)
     _i_ir := 4_000                                          ' IR LED current
     _ir_offset := 37_000
     _red_offset := 32_000
-    _div := 70
+    _div := 10
 
-    max30102.adcres(15)
+    max30102.adcres(18)
     max30102.opmode(max30102#SPO2)                          ' SPO2, HR 
     max30102.spo2scale(8192)                                ' 2048, 4096, 8192, 16384
     max30102.spo2samplerate(1600)                           ' 50, 100, 200, 400, 800, 1000, 1600, 3200
-    max30102.sampleaverages(32)                             ' 1, 2, 4, 8, 16, 32
+    max30102.sampleaverages(8)                              ' 1, 2, 4, 8, 16, 32
     max30102.int1mask(%010)                                 ' Bits 2..0:
 '                                                               2: FIFO level
 '                                                               1: New data available (required)
@@ -123,38 +125,38 @@ PUB cog_acquire | tmp[2], irlc, irhc, rlc, rhc
     max30102.irledcurrent(_i_ir)
 
     repeat
-        repeat until max30102.ppgdataready
+        repeat until max30102.ppgdataready()
         max30102.fiforead(@tmp)
         _last_ir := _ir_data
         _last_red := _red_data
         _ir_data := ((max30102.lastir-_ir_offset)*PRESCALE)/_div    ' Prescale to preserve precision
         _red_data := ((max30102.lastred-_red_offset)*PRESCALE)/_div ' then shrink it down
 
-        if _ir_data =< 0                                    ' If chart data goes offscreen
+        if _ir_data <= 0                                    ' If chart data goes offscreen
             irlc++                                          '   increment a counter
-        if irlc => 10                                       ' If the counter reaches the threshold
-            _ir_offset-=250                                 '   change the visual offset to bring
+        if irlc >= 10                                       ' If the counter reaches the threshold
+            _ir_offset-=100                                 '   change the visual offset to bring
             irlc := 0                                       '   the chart back onscreen
             _settings_changed := TRUE                       ' Notify the main cog
 
-        if _red_data =< 0
+        if _red_data <= 0
             rhc++
-        if rhc => 10
-            _red_offset-=250
+        if rhc >= 10
+            _red_offset-=100
             rhc := 0
             _settings_changed := TRUE
 
-        if _ir_data => YMAX
+        if _ir_data >= YMAX
             irhc++
-        if irhc => 10
-            _ir_offset+=250
+        if irhc >= 10
+            _ir_offset+=100
             irhc := 0
             _settings_changed := TRUE
 
-        if _red_data => YMAX
+        if _red_data >= YMAX
             rlc++
-        if rlc => 10
-            _red_offset+=250
+        if rlc >= 10
+            _red_offset+=100
             rlc := 0
             _settings_changed := TRUE
 
@@ -163,21 +165,21 @@ PUB cog_acquire | tmp[2], irlc, irhc, rlc, rhc
             max30102.irledcurrent(_i_ir)                    '   - they might've changed
             _die_temp := max30102.temperature               ' Update sensor die temperature
 
-PUB cog_keyInput | key
+PUB cog_keyInput() | key
 
     repeat
-        key := ser.charin
+        key := ser.charin()
             case key
                 "=":                                        ' Change LED current
                     _i_red := (_i_red + 0_200) <# 51_000    '   (both IR and Red)
                     _i_ir := (_i_ir + 0_200) <# 51_000
-                    max30102.redledcurrent(_i_red)
-                    max30102.irledcurrent(_i_ir)
+'                    max30102.redledcurrent(_i_red)
+'                    max30102.irledcurrent(_i_ir)
                 "-":
                     _i_red := (_i_red - 0_200) #> 0
                     _i_ir := (_i_ir - 0_200) #> 0
-                    max30102.redledcurrent(_i_red)
-                    max30102.irledcurrent(_i_ir)
+'                    max30102.redledcurrent(_i_red)
+'                    max30102.irledcurrent(_i_ir)
 
                 "I":                                        ' Manually change IR data chart offset
                     _ir_offset := (_ir_offset + 250) <# 2_621_440
@@ -202,27 +204,59 @@ PUB cog_keyInput | key
 PUB Setup
 
     repeat until ser.StartRXTX (SER_RX, SER_TX, 0, SER_BAUD)
-    time.MSleep(30)
-    ser.Clear
-    ser.Str(string("Serial terminal started", ser#CR, ser#LF))
+    ser.clear
+    ser.printf("Serial terminal started\n")
 
-    if vga.Start (VGA_PINGROUP, WIDTH, HEIGHT, @_framebuff)
-        ser.str(string("VGA Bitmap driver started", ser#CR, ser#LF))
-'        vga.FontAddress(fnt.BaseAddr)
-'        vga.FontSize(6, 8)
-        vga.clear
-'        vga.fgcolor(vga#MAX_COLOR)
-'        vga.str(string("Ready."))
+    setuppalette()
+    if vga.start (VGA_BASEPIN, @_framebuff, @_palette, WIDTH, HEIGHT)
+        ser.printf("VGA Bitmap driver started\n")
+        vga.FontAddress(fnt.BaseAddr())
+        vga.FontSize(6, 8)
+        vga.clear()
+        vga.fgcolor(vga.MAX_COLOR)
+        vga.printf("Ready.")
     else
-        ser.str(string("VGA Bitmap driver failed to start - halting", ser#CR, ser#LF))
+        ser.printf("VGA Bitmap driver failed to start - halting\n")
 
-    cognew(cog_keyInput, @_key_stack)
-    cognew(cog_acquire, @_acq_stack)
+    cogspin(16, cog_keyInput, @_key_stack)
+    cogspin(16, cog_acquire, @_acq_stack)
 
     repeat until _max30102_cog
-    ser.str(string("MAX30102 driver started", ser#CR, ser#LF))
+    ser.printf("MAX30102 driver started\n")
 
-#include "lib.utility.spin"
+PUB SetupPalette() | i, r, g, b, c
+' Set up palette
+    r := 0
+    g := 0
+    b := 0
+
+    repeat i from 0 to vga.MAX_COLOR
+        c := 0 | (r << 16) | (g << 8) | b
+        _palette[i] := c
+
+        case i
+            0..63:
+                r += 4
+                g := 0
+                b := 0
+            64..127:
+                r := 0
+                g += 4
+                b := 0
+            128..191:
+                r := 0
+                g := 0
+                b += 4
+            192..253:
+                r += 4
+                g += 4
+                b := 0
+            254..255:
+                r := 255
+                g := 255
+                b := 255
+
+#include "lib.utility.spin2"
 
 DAT
 {
