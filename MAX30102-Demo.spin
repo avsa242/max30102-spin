@@ -7,7 +7,7 @@
         SpO2 and HR data (raw ADC counts only)
     Copyright (c) 2020
     Started Apr 02, 2020
-    Updated Jul 1, 2020
+    Updated Nov 22, 2020
     See end of file for terms of use.
     --------------------------------------------
 }
@@ -18,15 +18,14 @@ CON
     _xinfreq    = cfg#_xinfreq
 
 ' -- User-modifiable constants
+    SER_BAUD    = 115_200
+    LED         = cfg#LED1
+
     SCL_PIN     = 0
     SDA_PIN     = 1
     I2C_HZ      = 400_000
 
-    SER_RX      = cfg#SER_RX_DEF
-    SER_TX      = cfg#SER_TX_DEF
-    SER_BAUD    = 115_200
-    LED         = cfg#LED1
-    VGA_PINGROUP= 2                                         ' 0, 1, 2, 3 (VGA pin base = pingroup * 8)
+    VGA_PINGROUP= 2                             ' 0, 1, 2, 3 (base = group * 8)
 ' --
 
     WIDTH       = vga#DISP_WIDTH
@@ -42,7 +41,6 @@ OBJ
 
     cfg         : "core.con.boardcfg.quickstart-hib"
     ser         : "com.serial.terminal.ansi"
-    io          : "io"
     time        : "time"
     max30102    : "sensor.bio.pulseoximeter.max30102.i2c"
     vga         : "display.vga.bitmap.160x120"
@@ -57,9 +55,9 @@ VAR
     byte _max30102_cog
     byte _framebuff[BUFFSZ]
 
-PUB Main | x
+PUB Main{} | x
 
-    Setup
+    setup{}
 
     vga.fgcolor(vga#MAX_COLOR)
 
@@ -70,23 +68,21 @@ PUB Main | x
 '            vga.plot(x, _ir_data #> 0, vga#MAX_COLOR)
 '            vga.plot(x, _red_data #> 0, %%300)
             if _settings_changed
-                displaysettings
-                quit                                        ' If settings changed, start a new loop
+                displaysettings{}
+                quit                            ' settings changed; restart
             time.msleep(10)
-            vga.box(x+1, 0, x+5, YMAX, 0, TRUE)             ' Erase the chart ahead of the current plot
+            vga.box(x+1, 0, x+5, YMAX, 0, TRUE) ' erase ahead of the plot
 
 ' Scroll View
     repeat
-        vga.waitvsync
+        vga.waitvsync{}
         vga.plot(XMAX-2, _ir_data #> 0, vga#MAX_COLOR)
         vga.plot(XMAX-2, _red_data #> 0, %%300)
         vga.scrollleft(0, 0, XMAX, YMAX)
         if _settings_changed
-            displaysettings
+            displaysettings{}
 
-   flashled(LED, 100)
-
-PUB DisplaySettings
+PUB DisplaySettings{}
 
     ser.position(0, 7)
     ser.printf(string("IR: %d, Red: %d     \n"), max30102.lastir, max30102.lastred, 0, 0, 0, 0)
@@ -98,44 +94,45 @@ PUB DisplaySettings
     ser.printf(string("Die temp: %d\n"), _die_temp, 0, 0, 0, 0, 0)
     _settings_changed := FALSE
 
-PUB cog_acquire | tmp[2], irlc, irhc, rlc, rhc
+PUB cog_acquire{} | tmp[2], irlc, irhc, rlc, rhc
 
-    repeat until _max30102_cog := max30102.Startx(SCL_PIN, SDA_PIN, I2C_HZ)
+    _max30102_cog := max30102.startx(SCL_PIN, SDA_PIN, I2C_HZ)
 
 ' Initial settings
-    _i_red := 4_000                                         ' Red LED current (uA)
-    _i_ir := 4_000                                          ' IR LED current
+    _i_red := 4_000                             ' Red LED current (uA)
+    _i_ir := 4_000                              ' IR LED current
     _ir_offset := 37_000
     _red_offset := 32_000
     _div := 70
 
     max30102.adcres(15)
-    max30102.opmode(max30102#SPO2)                          ' SPO2, HR 
-    max30102.spo2scale(8192)                                ' 2048, 4096, 8192, 16384
-    max30102.spo2samplerate(1600)                           ' 50, 100, 200, 400, 800, 1000, 1600, 3200
-    max30102.sampleaverages(32)                             ' 1, 2, 4, 8, 16, 32
-    max30102.int1mask(%010)                                 ' Bits 2..0:
-'                                                               2: FIFO level
-'                                                               1: New data available (required)
-'                                                               0: Amb. light cancellation overflow
+    max30102.opmode(max30102#SPO2)              ' SPO2, HR 
+    max30102.spo2scale(8192)                    ' 2048, 4096, 8192, 16384
+    max30102.spo2samplerate(1600)               ' 50, 100, 200, 400, 800, 1000, 1600, 3200
+    max30102.sampleaverages(32)                 ' 1, 2, 4, 8, 16, 32
+    max30102.int1mask(%010)                     ' Bits 2..0:
+'                                               2: FIFO level
+'                                               1: New data available (required)
+'                                               0: Amb. light cancellation overflow
 
     max30102.redledcurrent(_i_red)
     max30102.irledcurrent(_i_ir)
 
     repeat
-        repeat until max30102.ppgdataready
+        repeat until max30102.ppgdataready{}
         max30102.fiforead(@tmp)
         _last_ir := _ir_data
         _last_red := _red_data
-        _ir_data := ((max30102.lastir-_ir_offset)*PRESCALE)/_div    ' Prescale to preserve precision
-        _red_data := ((max30102.lastred-_red_offset)*PRESCALE)/_div ' then shrink it down
+        _ir_data := ((max30102.lastir{}-_ir_offset)*PRESCALE)/_div    ' Prescale to preserve precision
+        _red_data := ((max30102.lastred{}-_red_offset)*PRESCALE)/_div ' then shrink it down
 
-        if _ir_data =< 0                                    ' If chart data goes offscreen
-            irlc++                                          '   increment a counter
-        if irlc => 10                                       ' If the counter reaches the threshold
-            _ir_offset-=250                                 '   change the visual offset to bring
-            irlc := 0                                       '   the chart back onscreen
-            _settings_changed := TRUE                       ' Notify the main cog
+                                                ' Auto-scaling:
+        if _ir_data =< 0                        ' track how long data goes
+            irlc++                              '   offscreen. If threshold
+        if irlc => 10                           '   reached, change the visual
+            _ir_offset-=250                     '   offset to bring the chart
+            irlc := 0                           '   back onscreen
+            _settings_changed := TRUE           ' Notify the main cog
 
         if _red_data =< 0
             rhc++
@@ -158,15 +155,15 @@ PUB cog_acquire | tmp[2], irlc, irhc, rlc, rhc
             rlc := 0
             _settings_changed := TRUE
 
-        if _settings_changed                                ' If any settings are changed
-            max30102.redledcurrent(_i_red)                  ' Tell the sensor about the LED currents
-            max30102.irledcurrent(_i_ir)                    '   - they might've changed
-            _die_temp := max30102.temperature               ' Update sensor die temperature
+        if _settings_changed                    ' If any settings are changed
+            max30102.redledcurrent(_i_red)      ' Update sensor's LED currents
+            max30102.irledcurrent(_i_ir)        '   - they might've changed
+            _die_temp := max30102.temperature   ' Update sensor die temperature
 
-PUB cog_keyInput | key
+PUB cog_keyInput{} | key
 
     repeat
-        key := ser.charin
+        key := ser.charin{}
             case key
                 "=":                                        ' Change LED current
                     _i_red := (_i_red + 0_200) <# 51_000    '   (both IR and Red)
@@ -194,35 +191,31 @@ PUB cog_keyInput | key
                 "d":
                     _div := (_div - 1) #> 1_0
                 " ":
-                OTHER:
+                other:
                     next
 
             _settings_changed := TRUE
 
-PUB Setup
+PUB Setup{}
 
-    repeat until ser.StartRXTX (SER_RX, SER_TX, 0, SER_BAUD)
-    time.MSleep(30)
-    ser.Clear
-    ser.Str(string("Serial terminal started", ser#CR, ser#LF))
+    ser.start(SER_BAUD)
+    time.msleep(30)
+    ser.clear{}
+    ser.strln(string("Serial terminal started"))
 
-    if vga.Start (VGA_PINGROUP, WIDTH, HEIGHT, @_framebuff)
+    vga.start(VGA_PINGROUP, WIDTH, HEIGHT, @_framebuff)
         ser.str(string("VGA Bitmap driver started", ser#CR, ser#LF))
 '        vga.FontAddress(fnt.BaseAddr)
 '        vga.FontSize(6, 8)
-        vga.clear
+        vga.clear{}
 '        vga.fgcolor(vga#MAX_COLOR)
 '        vga.str(string("Ready."))
-    else
-        ser.str(string("VGA Bitmap driver failed to start - halting", ser#CR, ser#LF))
 
-    cognew(cog_keyInput, @_key_stack)
-    cognew(cog_acquire, @_acq_stack)
+    cognew(cog_keyinput{}, @_key_stack)
+    cognew(cog_acquire{}, @_acq_stack)
 
     repeat until _max30102_cog
-    ser.str(string("MAX30102 driver started", ser#CR, ser#LF))
-
-#include "lib.utility.spin"
+    ser.strln(string("MAX30102 driver started"))
 
 DAT
 {
