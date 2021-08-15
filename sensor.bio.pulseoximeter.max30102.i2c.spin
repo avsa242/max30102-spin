@@ -29,9 +29,14 @@ CON
     FIFO            = 0
     STREAM          = 1
 
+' Temperature scales
+    C               = 0
+    F               = 1
+
 VAR
 
     long _ir_sample, _red_sample
+    byte _temp_scale
 
 OBJ
 
@@ -350,21 +355,49 @@ PUB SpO2Scale(range): curr_rng
     range := ((curr_rng & core#SPO2_ADC_RGE_MASK) | range)
     writereg(core#SPO2CFG, 1, @range)
 
-PUB Temperature{}: temp | int, fract, tmp
-' Read die temperature
-'   Returns: Temperature in centi-degrees Celsius (signed)
-    int := fract := 0
+PUB TempData{}: temp_adc | tmp
+' Read temperature ADC data
+'   Returns: s12
     tmp := 1
     writereg(core#DIETEMPCFG, 1, @tmp)       ' Trigger a measurement
 
-    readreg(core#DIETEMP_INT, 1, @int)          ' LSB = 1C (signed 8b)
-    readreg(core#DIETEMP_FRACT, 1, @fract)      ' LSB = +0.0625C (always additive)
+    temp_adc := 0
+    readreg(core#DIETEMP_INT, 2, @temp_adc)
 
-    ~int
+PUB Temperature{}: temp
+' Current Temperature, in hundredths of a degree
+'   Returns: Integer
+'   (e.g., 2105 is equivalent to 21.05 deg C)
+    return tempword2deg(tempdata{})
+
+PUB TempScale(scale): curr_scale
+' Set temperature scale used by Temperature method
+'   Valid values:
+'      *C (0): Celsius
+'       F (1): Fahrenheit
+'   Any other value returns the current setting
+    case scale
+        C, F:
+            _temp_scale := scale
+        other:
+            return _temp_scale
+
+PUB TempWord2Deg(temp_adc): temp | int, fract
+' Convert temperature ADC word to temperature
+'   Returns: temperature, in hundredths of a degree, in chosen scale
+'   bits 11..4: integer (LSB = 1C), bits 3..0: fractional (LSB = 0.0625C)
+    int := ~temp_adc.byte[0]                    ' extend sign
+    fract := temp_adc.byte[1]
     int *= 1_0000                               ' Scale up to
     fract *= 0_0625                             '   preserve precision
-
-    return (int + fract) / 100                  ' Scale back down to centidegrees
+    temp := (int + fract) / 100
+    case _temp_scale
+        C:
+            return temp
+        F:
+            return ((temp * 9_00) / 5_00) + 32_00
+        other:
+            return FALSE
 
 PRI readReg(reg_nr, nr_bytes, ptr_buff) | cmd_packet, tmp
 ' Read nr_bytes from the device into ptr_buff
