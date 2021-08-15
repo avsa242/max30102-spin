@@ -107,31 +107,21 @@ PUB ADCRes(sres): curr_res
     sres := ((curr_res & core#LED_PW) | sres)
     writereg(core#SPO2CFG, 1, @sres)
 
-PUB DataOverrun{}: flag
-' Flag indicating data overrun
-'   Returns: Number of FIFO samples overrun/lost (0..31)
-    readreg(core#OVERFL_CNT, 1, @flag)
-
 PUB DeviceID{}: id
 ' Read device identification
 '   Returns: $15
     readreg(core#REVID, 2, @id)
     return id.byte[1]
 
-PUB FIFOIntLevel(level): curr_lvl
-' Set number of unread level in FIFO required to assert an interrupt
-'   Valid values: 17..*32
-'   Any other value polls the chip and returns the current setting
-    curr_lvl := 0
-    readreg(core#FIFOCFG, 1, @curr_lvl)
-    case level
-        17..32:
-            level := 32-level
-        other:
-            return (curr_lvl & core#FIFO_A_FULL_BITS)
+PUB FIFODataOverrun{}: flag
+' Flag indicating FIFO data has overrun
+'   Returns: TRUE (-1) or FALSE (0)
+    return (fifosampleslost{} <> 0)
 
-    level := ((curr_lvl & core#FIFO_A_FULL) | level)
-    writereg(core#FIFOCFG, 1, @level)
+PUB FIFOFull{}: flag
+' Flag indicating FIFO is full
+'   Returns: TRUE (-1) if full, FALSE otherwise
+    return (((interrupt1{} >> 2) & 1) == 1)
 
 PUB FIFOMode(mode): curr_mode
 ' Set FIFO operating mode
@@ -159,10 +149,25 @@ PUB FIFORead(ptr_data) | tmp[2]
     long[ptr_data][0] := _ir_sample
     long[ptr_data][1] := _red_sample
 
-PUB FIFOFull{}: flag
-' Flag indicating FIFO is full
-'   Returns: TRUE (-1) if full, FALSE otherwise
-    return (((interrupt1{} >> 2) & 1) == 1)
+PUB FIFOSamplesLost{}: nr_smp
+' Number of FIFO samples lost
+'   Returns: 0..31
+    readreg(core#OVERFL_CNT, 1, @nr_smp)
+
+PUB FIFOThreshold(level): curr_lvl
+' Set number of unread level in FIFO required to assert an interrupt
+'   Valid values: 17..*32
+'   Any other value polls the chip and returns the current setting
+    curr_lvl := 0
+    readreg(core#FIFOCFG, 1, @curr_lvl)
+    case level
+        17..32:
+            level := 32-level
+        other:
+            return (curr_lvl & core#FIFO_A_FULL_BITS)
+
+    level := ((curr_lvl & core#FIFO_A_FULL) | level)
+    writereg(core#FIFOCFG, 1, @level)
 
 PUB FIFOUnreadSamples{}: nr_samples | rd_ptr, wr_ptr
 ' Number of undread samples in FIFO
