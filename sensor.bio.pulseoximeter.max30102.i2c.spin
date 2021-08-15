@@ -55,7 +55,6 @@ PUB Startx(SCL_PIN, SDA_PIN, I2C_HZ): status
             if i2c.present(SLAVE_WR)       ' check device bus presence
                 if deviceid{} == core#DEVID_RESP
                     reset{}
-                    powered(TRUE)
                     return
     ' if this point is reached, something above failed
     ' Double check I/O pin assignments, connections, power
@@ -63,8 +62,29 @@ PUB Startx(SCL_PIN, SDA_PIN, I2C_HZ): status
     return FALSE
 
 PUB Stop{}
-
+' Stop I2C engine
     i2c.deinit{}
+
+PUB Defaults{}
+' Factory default settings
+    reset{}
+
+PUB Preset_Pulse{}
+' Preset settings for pulse/HR measurement
+    reset{}
+    powered(TRUE)
+    'XXX fill in
+
+PUB Preset_OxySat{}
+' Preset settings for oxygen saturation/SpO2 measurement (includes HR)
+    reset{}
+    powered(TRUE)
+    adcres(15)
+    opmode(SPO2)
+    spo2scale(8192)
+    spo2samplerate(1600)
+    sampleaverages(32)
+    int1mask(%010)
 
 PUB ADCRes(sres): curr_res
 ' Set sensor ADC resolution, in bits

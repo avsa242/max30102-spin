@@ -105,16 +105,7 @@ PUB cog_acquire{} | tmp[2], irlc, irhc, rlc, rhc
     _red_offset := 32_000
     _div := 70
 
-    max30102.adcres(15)
-    max30102.opmode(max30102#SPO2)              ' SPO2, HR 
-    max30102.spo2scale(8192)                    ' 2048, 4096, 8192, 16384
-    max30102.spo2samplerate(1600)               ' 50, 100, 200, 400, 800, 1000, 1600, 3200
-    max30102.sampleaverages(32)                 ' 1, 2, 4, 8, 16, 32
-    max30102.int1mask(%010)                     ' Bits 2..0:
-'                                               2: FIFO level
-'                                               1: New data available (required)
-'                                               0: Amb. light cancellation overflow
-
+    max30102.preset_oxysat{}
     max30102.redledcurrent(_i_red)
     max30102.irledcurrent(_i_ir)
 
