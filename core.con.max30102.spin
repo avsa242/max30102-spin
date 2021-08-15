@@ -1,20 +1,22 @@
 {
     --------------------------------------------
     Filename: core.con.max30102.spin
-    Author:
-    Description:
-    Copyright (c) 2020
+    Author: Jesse Burt
+    Description: MAX30102-specific low-level constants
+    Copyright (c) 2021
     Started Apr 02, 2020
-    Updated Apr 02, 2020
+    Updated Aug 15, 2021
     See end of file for terms of use.
     --------------------------------------------
 }
 
 CON
 
-    I2C_MAX_FREQ                = 400_000               'Change to your device's maximum bus rate, according to its datasheet
+    I2C_MAX_FREQ                = 400_000
     SLAVE_ADDR                  = $57 << 1
+    T_POR                       = 1_000         ' uSec
 
+    DEVID_RESP                  = $15
 
     INTSTATUS1                  = $00
     INTSTATUS1_MASK             = $E1
@@ -110,9 +112,8 @@ CON
 ' RESERVED                      = $2D
 ' RESERVED                      = $2E
 ' RESERVED                      = $2F
-    REVID                       = $FE   ' Revision: Can be $00..$FF
+    REVID                       = $FE           ' Revision: Can be $00..$FF
     PARTID                      = $FF
-    PARTID_RESP                 = $15
 
 PUB Null
 '' This is not a top-level object

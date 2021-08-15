@@ -3,9 +3,9 @@
     Filename: sensor.bio.pulseoximeter.max30102.i2c.spin
     Author: Jesse Burt
     Description: Driver for the MAX30102 pulse-oximeter/heart-rate sensor
-    Copyright (c) 2020
+    Copyright (c) 2021
     Started Apr 02, 2020
-    Updated Nov 22, 2020
+    Updated Aug 15, 2021
     See end of file for terms of use.
     --------------------------------------------
 }
@@ -31,34 +31,36 @@ VAR
 
 OBJ
 
-    i2c : "com.i2c"
-    core: "core.con.max30102"
-    time: "time"
+    i2c : "com.i2c"                             ' PASM I2C engine (~400kHz)
+    core: "core.con.max30102"                   ' HW-specific constants
+    time: "time"                                ' timekeeping methods
 
 PUB Null{}
-'This is not a top-level object
+' This is not a top-level object
 
-PUB Start{}: okay
+PUB Start{}: status
 ' Start using "standard" Propeller I2C pins, and 100kHz
-    okay := startx(DEF_SCL, DEF_SDA, DEF_HZ)
+    return startx(DEF_SCL, DEF_SDA, DEF_HZ)
 
-PUB Startx(SCL_PIN, SDA_PIN, I2C_HZ): okay
-
-    if lookdown(SCL_PIN: 0..31) and lookdown(SDA_PIN: 0..31)
-        if I2C_HZ =< core#I2C_MAX_FREQ
-            if okay := i2c.setupx(SCL_PIN, SDA_PIN, I2C_HZ)
-                time.msleep(1)
-                if i2c.present(SLAVE_WR)       ' check device bus presence
-                    if deviceid{} >> 8 == core#PARTID_RESP
-                        reset{}
-                        powered(TRUE)
-                        return okay
-
-    return FALSE                                ' something above failed
+PUB Startx(SCL_PIN, SDA_PIN, I2C_HZ): status
+' Start using custom I/O pins and bus speed
+    if lookdown(SCL_PIN: 0..31) and lookdown(SDA_PIN: 0..31) and {
+}   I2C_HZ =< core#I2C_MAX_FREQ
+        if (status := i2c.init(SCL_PIN, SDA_PIN, I2C_HZ))
+            time.usleep(core#T_POR)
+            if i2c.present(SLAVE_WR)       ' check device bus presence
+                if deviceid{} == core#DEVID_RESP
+                    reset{}
+                    powered(TRUE)
+                    return
+    ' if this point is reached, something above failed
+    ' Double check I/O pin assignments, connections, power
+    ' Lastly - make sure you have at least one free core/cog
+    return FALSE
 
 PUB Stop{}
-' Put any other housekeeping code here required/recommended by your device before shutting down
-    i2c.terminate{}
+
+    i2c.deinit{}
 
 PUB ADCRes(bits): curr_res
 ' Set sensor ADC resolution, in bits
@@ -83,9 +85,10 @@ PUB DataOverrun{}: flag
     readreg(core#OVERFLOWCNT, 1, @flag)
 
 PUB DeviceID{}: id
-' Get device part number/ID
-'   Returns: $15xx (xx = revision ID; can be $00..$FF)
+' Read device identification
+'   Returns: $15
     readreg(core#REVID, 2, @id)
+    return id.byte[1]
 
 PUB FIFOIntLevel(level): curr_lvl
 ' Set number of unread level in FIFO required to assert an interrupt
@@ -113,8 +116,10 @@ PUB FIFORead(ptr_data) | tmp[2]
 PUB FIFORollover(state): curr_state
 ' Enable FIFO data rollover
 '   Valid values:
-'       TRUE (-1 or 1): If FIFO becomes completely filled, new data will overwrite old data (oldest data first)
-'      *FALSE (0): If FIFO becomes completely filled, it won't be updated until new data is read
+'       TRUE (-1 or 1): If FIFO becomes completely filled, new data will
+'           overwrite old data (oldest data first)
+'      *FALSE (0): If FIFO becomes completely filled, it won't be updated
+'           until new data is read
     curr_state := $00
     readreg(core#FIFOCONFIG, 1, @curr_state)
     case ||(state)
@@ -144,7 +149,8 @@ PUB Interrupt1{}: status
 '   Bits 210
 '       2: FIFO interrupt level reached (set using FIFOIntLevel()
 '       1: New data sample ready
-'       0: Ambient light cancellation overflow (ambient light is affecting reading)
+'       0: Ambient light cancellation overflow
+'           (ambient light is affecting reading)
     readreg(core#INTSTATUS1, 2, @status)
     status >>= core#FLD_ALC_OVF
 
@@ -158,7 +164,8 @@ PUB Int1Mask(mask): curr_mask
 '   Bits 210
 '       2: FIFO interrupt level reached (set using FIFOIntLevel()
 '       1: New data sample ready
-'       0: Ambient light cancellation overflow (ambient light is affecting reading)
+'       0: Ambient light cancellation overflow
+'           (ambient light is affecting reading)
 '       Default: %000
 '   Any other value polls the chip and returns the current setting
     readreg(core#INTENABLE1, 1, @curr_mask)
@@ -190,7 +197,8 @@ PUB IRLEDCurrent(curr) | curr_set
 ' Set IR LED current limit, in microAmperes
 '   Valid values: 0..51000 (default: 0)
 '   Any other value polls the chip and returns the current setting
-'   NOTE: Per the datasheet, actual measured LED current for each part can vary widely due to trimming methodology
+'   NOTE: Per the datasheet, actual measured LED current for each part can
+'       vary widely due to trimming methodology
     curr_set := $00
     readreg(core#LED2PA, 1, @curr_set)
     case curr
@@ -218,7 +226,8 @@ PUB RedLEDCurrent(curr) | curr_set
 ' Set Red LED current limit, in microAmperes
 '   Valid values: 0..51000 (default: 0)
 '   Any other value polls the chip and returns the current setting
-'   NOTE: Per the datasheet, actual measured LED current for each part can vary widely due to trimming methodology
+'   NOTE: Per the datasheet, actual measured LED current for each part can
+'       vary widely due to trimming methodology
     curr_set := $00
     readreg(core#LED1PA, 1, @curr_set)
     case curr
@@ -286,7 +295,7 @@ PUB SampleAverages(nr_samples) | curr_set
     writereg(core#FIFOCONFIG, 1, @nr_samples)
 
 PUB SpO2SampleRate(rate): curr_rate
-' Set SpO2 sensor sample rate, in rate
+' Set SpO2 sensor sample rate, in Hz
 '   Valid values: *50, 100, 200, 400, 800, 1000, 1600, 3200
 '   Any other value polls the chip and returns the current setting
     curr_rate := $00
@@ -322,42 +331,41 @@ PUB Temperature{}: temp | int, fract, tmp
 '   Returns: Temperature in centi-degrees Celsius (signed)
     int := fract := 0
     tmp := %1
-    writereg(core#DIETEMPCONFIG, 1, @tmp)                       ' Trigger a measurement
+    writereg(core#DIETEMPCONFIG, 1, @tmp)       ' Trigger a measurement
 
-    readreg(core#DIETEMP_INT, 1, @int)                          ' LSB = 1C (signed 8b)
-    readreg(core#DIETEMP_FRACT, 1, @fract)                      ' LSB = +0.0625C (always additive)
+    readreg(core#DIETEMP_INT, 1, @int)          ' LSB = 1C (signed 8b)
+    readreg(core#DIETEMP_FRACT, 1, @fract)      ' LSB = +0.0625C (always additive)
 
     ~int
-    int *= 1_0000                                               ' Scale up to
-    fract *= 0_0625                                             '   preserve precision
+    int *= 1_0000                               ' Scale up to
+    fract *= 0_0625                             '   preserve precision
 
-    return (int + fract) / 100                                  ' Scale back down to centidegrees
+    return (int + fract) / 100                  ' Scale back down to centidegrees
 
-PRI readReg(reg, nr_bytes, buff_addr) | cmd_packet, tmp
-'' Read num_bytes from the slave device into the address stored in buff_addr
-    case reg                                                    'Basic register validation
+PRI readReg(reg_nr, nr_bytes, ptr_buff) | cmd_packet, tmp
+' Read nr_bytes from the device into ptr_buff
+    case reg_nr                                 ' validate register #
         $00..$0A, $0C, $0D, $11, $12, $1F..$21, $FE, $FF:
             cmd_packet.byte[0] := SLAVE_WR
-            cmd_packet.byte[1] := reg
+            cmd_packet.byte[1] := reg_nr
             i2c.start{}
-            i2c.wr_block(@cmd_packet, 2)
+            i2c.wrblock_lsbf(@cmd_packet, 2)
             i2c.start{}
             i2c.write (SLAVE_RD)
-            i2c.rd_block(buff_addr, nr_bytes, TRUE)
+            i2c.rdblock_lsbf(ptr_buff, nr_bytes, i2c#NAK)
             i2c.stop{}
         other:
             return
 
-PRI writeReg(reg, nr_bytes, buff_addr) | cmd_packet, tmp
-'' Write num_bytes to the slave device from the address stored in buff_addr
-    case reg                                                    'Basic register validation
+PRI writeReg(reg_nr, nr_bytes, ptr_buff) | cmd_packet, tmp
+' Write nr_bytes to the device from ptr_buff
+    case reg_nr                                    ' validate register #
         $02..$0D, $11, $12, $21:
             cmd_packet.byte[0] := SLAVE_WR
-            cmd_packet.byte[1] := reg
+            cmd_packet.byte[1] := reg_nr
             i2c.start{}
-            i2c.wr_block(@cmd_packet, 2)
-            repeat tmp from 0 to nr_bytes-1
-                i2c.write(byte[buff_addr][tmp])
+            i2c.wrblock_lsbf(@cmd_packet, 2)
+            i2c.wrblock_lsbf(ptr_buff, nr_bytes)
             i2c.stop{}
         other:
             return
