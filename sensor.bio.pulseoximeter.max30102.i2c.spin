@@ -12,18 +12,22 @@
 
 CON
 
-    SLAVE_WR            = core#SLAVE_ADDR
-    SLAVE_RD            = core#SLAVE_ADDR|1
+    SLAVE_WR        = core#SLAVE_ADDR
+    SLAVE_RD        = core#SLAVE_ADDR|1
 
-    DEF_SCL             = 28
-    DEF_SDA             = 29
-    DEF_HZ              = 100_000
-    I2C_MAX_FREQ        = core#I2C_MAX_FREQ
+    DEF_SCL         = 28
+    DEF_SDA         = 29
+    DEF_HZ          = 100_000
+    I2C_MAX_FREQ    = core#I2C_MAX_FREQ
 
 ' Operating modes
-    HR                  = %010
-    SPO2                = %011
-    MULTI_LED           = %111
+    HR              = %010
+    SPO2            = %011
+    MULTI_LED       = %111
+
+' FIFO operating modes
+    FIFO            = 0
+    STREAM          = 1
 
 VAR
 
@@ -104,6 +108,24 @@ PUB FIFOIntLevel(level): curr_lvl
     level := ((curr_lvl & core#FIFO_A_FULL) | level)
     writereg(core#FIFOCFG, 1, @level)
 
+PUB FIFOMode(mode): curr_mode
+' Set FIFO operating mode
+'   Valid values:
+'      *FIFO (0): If FIFO becomes completely filled, it won't be updated
+'           until new data is read
+'       STREAM (1): If FIFO becomes completely filled, new data will
+'           overwrite old data (oldest data first)
+    curr_mode := 0
+    readreg(core#FIFOCFG, 1, @curr_mode)
+    case mode
+        FIFO, STREAM:
+            mode <<= core#FIFO_RLOV_EN
+        other:
+            return ((curr_mode >> core#FIFO_RLOV_EN) & 1)
+
+    mode := ((curr_mode & core#FIFO_RLOV_EN_MASK) | mode)
+    writereg(core#FIFOCFG, 1, @mode)
+
 PUB FIFORead(ptr_data) | tmp[2]
 ' Read PPG data from the FIFO
     readreg(core#FIFODATA, 6, @tmp)
@@ -111,24 +133,6 @@ PUB FIFORead(ptr_data) | tmp[2]
     _red_sample := (tmp.byte[3] << 16 | tmp.byte[4] << 8 | tmp.byte[5]) & $3FFFF
     long[ptr_data][0] := _ir_sample
     long[ptr_data][1] := _red_sample
-
-PUB FIFORollover(state): curr_state
-' Enable FIFO data rollover
-'   Valid values:
-'       TRUE (-1 or 1): If FIFO becomes completely filled, new data will
-'           overwrite old data (oldest data first)
-'      *FALSE (0): If FIFO becomes completely filled, it won't be updated
-'           until new data is read
-    curr_state := 0
-    readreg(core#FIFOCFG, 1, @curr_state)
-    case ||(state)
-        0, 1:
-            state := ||(state) << core#FIFO_RLOV_EN
-        other:
-            return (((curr_state >> core#FIFO_RLOV_EN) & 1) == 1)
-
-    state := ((curr_state & core#FIFO_RLOV_EN_MASK) | state)
-    writereg(core#FIFOCFG, 1, @state)
 
 PUB FIFOFull{}: flag
 ' Flag indicating FIFO is full
