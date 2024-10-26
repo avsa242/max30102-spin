@@ -42,7 +42,7 @@ OBJ
     cfg         : "boardcfg.quickstart-hib"
     ser         : "com.serial.terminal.ansi"
     time        : "time"
-    max30102    : "sensor.bio.pulseoximeter.max30102.i2c"
+    max30102    : "sensor.bio.pulse-ox.max30102"
     vga         : "display.vga.bitmap.160x120"
     fnt         : "font.5x8"
 

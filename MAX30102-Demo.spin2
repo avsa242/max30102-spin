@@ -42,7 +42,7 @@ OBJ
 
     cfg         : "boardcfg.p2eval"
     ser         : "com.serial.terminal.ansi"
-    max30102    : "sensor.bio.pulseoximeter.max30102.i2c.spin2"
+    max30102    : "sensor.bio.pulse-ox.max30102"
     vga         : "display.vga.bitmap-8bpp"
     fnt         : "font.5x8"
 
