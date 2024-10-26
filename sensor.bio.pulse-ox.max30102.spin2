@@ -1,395 +1,544 @@
 {
-    --------------------------------------------
-    Filename: sensor.biometric.pulseoximeter.max30102.i2c.spin
-    Author: Jesse Burt
-    Description: Driver for the MAX30102 pulse-oximeter/heart-rate sensor
-    Copyright (c) 2020
-    Started Apr 02, 2020
-    Updated Jun 30, 2020
-    See end of file for terms of use.
-    --------------------------------------------
+----------------------------------------------------------------------------------------------------
+    Filename:       sensor.bio.pulse-ox.max30102.spin2
+    Description:    Driver for the MAX30102 pulse-oximeter/heart-rate sensor
+    Author:         Jesse Burt
+    Started:        Jul 2, 2020
+    Updated:        Oct 26, 2024
+    Copyright (c) 2024 - See end of file for terms of use.
+----------------------------------------------------------------------------------------------------
 }
+
+#include "sensor.temp.common.spin2h"            ' use code common to temperature sensor drivers
+
 
 CON
 
-    SLAVE_WR          = core.SLAVE_ADDR
-    SLAVE_RD          = core.SLAVE_ADDR|1
+    { default I/O settings; these can be overridden in the parent object }
+    SCL             = 0
+    SDA             = 1
+    I2C_FREQ        = 100_000
+    I2C_ADDR        = 0                         ' unsupported by device
 
-    DEF_SCL           = 28
-    DEF_SDA           = 29
-    DEF_HZ            = 400_000
-    I2C_MAX_FREQ      = core.I2C_MAX_FREQ
 
 ' Operating modes
-    HR                  = %010
-    SPO2                = %011
-    MULTI_LED           = %111
+    HR              = %010
+    SPO2            = %011
+    MULTI_LED       = %111
+
+' FIFO operating modes
+    FIFO            = 0
+    STREAM          = 1
+
+' Temperature scales
+    C               = 0
+    F               = 1
+
+
+    SLAVE_WR        = core.SLAVE_ADDR
+    SLAVE_RD        = core.SLAVE_ADDR|1
+    I2C_MAX_FREQ    = core.I2C_MAX_FREQ
+
 
 VAR
 
     long _ir_sample, _red_sample
 
+
 OBJ
 
-    i2c : "com.i2c"                                             'PASM I2C Driver
-    core: "core.con.max30102.spin"
+    i2c:    "com.i2c"                           ' I2C engine
+    core:   "core.con.max30102"                 ' HW-specific constants
 
-PUB Null
-''This is not a top-level object
 
-PUB Start(SCL_PIN, SDA_PIN, I2C_HZ): okay
+PUB null()
+' This is not a top-level object
 
-    if lookdown(SCL_PIN: 0..63) and lookdown(SDA_PIN: 0..63)
-        if I2C_HZ <= core.I2C_MAX_FREQ
-            if okay := i2c.setup (SCL_PIN, SDA_PIN, I2C_HZ)    'I2C Object Started?
-                waitms (1)
-                if i2c.present (SLAVE_WR)                       'Response from device?
-                    if DeviceID() >> 8 == core.PARTID_RESP
-                        Reset()
-                        Powered(TRUE)
-                        return okay
-    return FALSE                                                'If we got here, something went wrong
 
-PUB Stop()
-'
+PUB start(): status
+' Start using default I/O settings
+    return startx(SCL, SDA, I2C_FREQ)
 
-PUB ADCRes(bits): tmp
+
+PUB startx(SCL_PIN, SDA_PIN, I2C_HZ): status
+' Start the driver with custom I/O settings
+'   SCL_PIN:    I2C clock, 0..63
+'   SDA_PIN:    I2C data, 0..63
+'   I2C_HZ:     I2C clock speed (max official specification is 400_000 but is unenforced)
+'   Returns:
+'       cog ID+1 of I2C engine on success
+'       0 on failure
+    if ( lookdown(SCL_PIN: 0..63) and lookdown(SDA_PIN: 0..63) )
+        if (status := i2c.init(SCL_PIN, SDA_PIN, I2C_HZ))
+            waitus(core.T_POR)
+            if ( dev_id() == core.DEVID_RESP )
+                reset()
+                return
+    ' if this point is reached, something above failed
+    ' Double check I/O pin assignments, connections, power
+    ' Lastly - make sure you have at least one free core/cog
+    return FALSE
+
+
+PUB stop()
+' Stop the driver
+    i2c.deinit()
+
+
+PUB defaults()
+' Factory default settings
+    reset()
+
+
+PUB preset_pulse()
+' Preset settings for pulse/HR measurement
+    reset()
+    powered(TRUE)
+    opmode(HR)
+    'XXX fill in
+
+
+PUB preset_oxysat()
+' Preset settings for oxygen saturation/SpO2 measurement (includes HR)
+    reset()
+    powered(TRUE)
+    adc_res(15)
+    opmode(SPO2)
+    spo2_scale(8192)
+    spo2_sample_rate(1600)
+    sample_averages(32)
+    int1_mask(%010)
+
+
+PUB adc_res(sres=-2): c
 ' Set sensor ADC resolution, in bits
 '   Valid values: *15, 16, 17, 18
 '   Any other value polls the chip and returns the current setting
-    tmp := $00
-    readReg(core.SPO2CONFIG, 1, @tmp)
-    case bits
+    c := 0
+    readreg(core.SPO2CFG, 1, @c)
+    case sres
         15, 16, 17, 18:
-            bits := lookdownz(bits: 15, 16, 17, 18) & core.BITS_LED_PW
-        OTHER:
-            tmp &= core.BITS_LED_PW
-            return lookupz(tmp: 15, 16, 17, 18)
+            sres := lookdownz(sres: 15, 16, 17, 18) & core.LED_PW_BITS
+            sres := ((c & core.LED_PW_MASK) | sres)
+            writereg(core.SPO2CFG, 1, @sres)
+        other:
+            c &= core.LED_PW_BITS
+            return lookupz(c: 15, 16, 17, 18)
 
-    tmp &= core.MASK_LED_PW
-    tmp := (tmp | bits) & core.SPO2CONFIG_MASK
-    writeReg(core.SPO2CONFIG, 1, @tmp)
 
-PUB DataOverrun(): result
-' Flag indicating data overrun
-'   Returns: Number of FIFO samples overrun/lost (0..31)
-    readReg(core.OVERFLOWCNT, 1, @result)
+PUB dev_id(): id
+' Read device identification
+'   Returns: $15
+    id := 0
+    readreg(core.REVID, 2, @id)
+    return id.byte[1]
 
-PUB DeviceID(): result
-' Get device part number/ID
-'   Returns: $15xx (xx = revision ID; can be $00..$FF)
-    readReg(core.REVID, 2, @result)
 
-PUB FIFOIntLevel(samples): tmp
-' Set number of unread samples in FIFO required to assert an interrupt
-'   Valid values: 17..*32
-'   Any other value polls the chip and returns the current setting
-    tmp := $00
-    readReg(core.FIFOCONFIG, 1, @tmp)
-    case samples
-        17..32:
-            samples := 32-samples
-        OTHER:
-            tmp &= core.BITS_FIFO_A_FULL
+PUB fifo_data_overrun(): f
+' Flag indicating FIFO data has overrun
+'   Returns: TRUE (-1) or FALSE (0)
+    return ( fifo_samples_lost() <> 0 )
+
+
+PUB fifo_full(): f
+' Flag indicating FIFO is full
+'   Returns: TRUE (-1) if full, FALSE otherwise
+    return ( ( (interrupt1() >> 2) & 1) == 1)
+
+
+PUB fifo_mode(mode=-2): c
+' Set FIFO operating mode
+'   Valid values:
+'      *FIFO (0): If FIFO becomes completely filled, it won't be updated
+'           until new data is read
+'       STREAM (1): If FIFO becomes completely filled, new data will
+'           overwrite old data (oldest data first)
+    c := 0
+    readreg(core.FIFOCFG, 1, @c)
+    case mode
+        FIFO, STREAM:
+            mode <<= core.FIFO_RLOV_EN
+            mode := ((c & core.FIFO_RLOV_EN_MASK) | mode)
+            writereg(core.FIFOCFG, 1, @mode)
+        other:
+            return ((c >> core.FIFO_RLOV_EN) & 1)
+
+
+PUB fifo_overflow_ctr(val=-2): c
+' Set FIFO overflow counter
+'   val: overflow threshold
+'   Returns:
+'       current setting, if val is invalid
+    case val
+        0..31:
+            writereg(core.OVERFL_CNT, 1, @val)
+        other:
+            c := 0
+            readreg(core.OVERFL_CNT, 1, @c)
             return
 
-    tmp &= core.MASK_FIFO_A_FULL
-    tmp := (tmp | samples) & core.FIFOCONFIG_MASK
-    writeReg(core.FIFOCONFIG, 1, @tmp)
 
-PUB FIFORead(ptr_data) | tmp[2]
+PUB fifo_rd_ptr(rd_loc=-2): c
+' Set FIFO read pointer
+'   rd_loc: address within FIFO to set read pointer to
+'   Returns:
+'       current setting, if rd_loc is invalid
+    case rd_loc
+        0..31:
+            writereg(core.FIFO_RDPTR, 1, @rd_loc)
+        other:
+            c := 0
+            readreg(core.FIFO_RDPTR, 1, @c)
+            return
+
+
+PUB fifo_read(ptr_data) | tmp[2]
 ' Read PPG data from the FIFO
-    readReg(core.FIFODATA, 6, @tmp)
+    readreg(core.FIFODATA, 6, @tmp)
     _ir_sample := (tmp.byte[0] << 16 | tmp.byte[1] << 8 | tmp.byte[2]) & $3FFFF
     _red_sample := (tmp.byte[3] << 16 | tmp.byte[4] << 8 | tmp.byte[5]) & $3FFFF
     long[ptr_data][0] := _ir_sample
     long[ptr_data][1] := _red_sample
 
-PUB FIFORollover(enabled): tmp
-' Enable FIFO data rollover
-'   Valid values:
-'       TRUE (-1 or 1): If FIFO becomes completely filled, new data will overwrite old data (oldest data first)
-'      *FALSE (0): If FIFO becomes completely filled, it won't be updated until new data is read
-    tmp := $00
-    readReg(core.FIFOCONFIG, 1, @tmp)
-    case abs(enabled)
-        0, 1:
-            enabled := abs(enabled) << core.FLD_FIFO_ROLLOVER_EN
-        OTHER:
-            tmp := (tmp >> core.FLD_FIFO_ROLLOVER_EN) & %1
-            return tmp * TRUE
 
-    tmp &= core.MASK_FIFO_ROLLOVER_EN
-    tmp := (tmp | enabled) & core.FIFOCONFIG_MASK
-    writeReg(core.FIFOCONFIG, 1, @tmp)
+PUB fifo_samples_lost(): n
+' Number of FIFO samples lost
+'   Returns: 0..31
+    n := 0
+    readreg(core.OVERFL_CNT, 1, @n)
 
-PUB FIFOFull(): result
-' Flag indicating FIFO is full
-'   Returns: TRUE (-1) if full, FALSE otherwise
-    result := ((Interrupt1 >> 2) & 1) * TRUE
 
-PUB FIFOUnreadSamples(): result | rd_ptr, wr_ptr
+PUB fifo_clr_overflow() | tmp 'xxx tentatively named
+' Clear FIFO overflow flag
+    tmp := 0
+    writereg(core.OVERFL_CNT, 1, @tmp)
+
+
+PUB fifo_thresh(level=-2): c
+' Set number of unread level in FIFO required to assert an interrupt
+'   Valid values: 17..*32
+'   Any other value polls the chip and returns the current setting
+    c := 0
+    readreg(core.FIFOCFG, 1, @c)
+    case level
+        17..32:
+            level := 32-level
+            level := ((c & core.FIFO_A_FULL_MASK) | level)
+            writereg(core.FIFOCFG, 1, @level)
+        other:
+            return (c & core.FIFO_A_FULL_BITS)
+
+
+PUB fifo_unread_samples(): n | rd_ptr, wr_ptr
 ' Number of undread samples in FIFO
 '   Returns: Integer
-    readReg(core.FIFOWRITEPTR, 1, @wr_ptr)
-    readReg(core.FIFOREADPTR, 1, @rd_ptr)
+    rd_ptr := wr_ptr := 0
+    readreg(core.FIFO_WRPTR, 1, @wr_ptr)
+    readreg(core.FIFO_RDPTR, 1, @rd_ptr)
 
-    return (abs(( 16 + wr_ptr - rd_ptr )) // 16)
+    return ( abs( 16 + wr_ptr - rd_ptr ) // 16 )
 
-PUB Interrupt1(): result
+
+PUB fifo_wr_ptr(wr_loc=-2): c
+' Set the FIFO write pointer
+'   wr_loc: address within the FIFO to set the write pointer
+'   Returns:
+'       current setting, if wr_loc is invalid
+    case wr_loc
+        0..31:
+            writereg(core.FIFO_WRPTR, 1, @wr_loc)
+        other:
+            c := 0
+            readreg(core.FIFO_WRPTR, 1, @c)
+            return
+
+
+PUB interrupt1(): s
 ' Get interrupt 1 status
 '   Bits 210
-'       2: FIFO interrupt level reached (set using FIFOIntLevel()
+'       2: FIFO interrupt level reached (set using fifo_thresh() )
 '       1: New data sample ready
-'       0: Ambient light cancellation overflow (ambient light is affecting reading)
-    readReg(core.INTSTATUS1, 2, @result)
-    result >>= core.FLD_ALC_OVF
+'       0: Ambient light cancellation overflow
+'           (ambient light is affecting reading)
+    s := 0
+    readreg(core.INTSTATUS1, 2, @s)
+    s >>= core.ALC_OVF
 
-PUB Interrupt2(): result
+
+PUB interrupt2(): s
 ' Get interrupt 2 status
 '   1: Die temperature measurement ready
-    readReg(core.INTSTATUS2, 2, @result)
+    s := 0
+    readreg(core.INTSTATUS2, 2, @s)
 
-PUB Int1Mask(mask): tmp
+
+PUB int1_mask(mask=-2): c
 ' Set interrupt 1 mask
 '   Bits 210
-'       2: FIFO interrupt level reached (set using FIFOIntLevel()
+'       2: FIFO interrupt level reached (set using fifo_thresh()
 '       1: New data sample ready
-'       0: Ambient light cancellation overflow (ambient light is affecting reading)
+'       0: Ambient light cancellation overflow
+'           (ambient light is affecting reading)
 '       Default: %000
 '   Any other value polls the chip and returns the current setting
-    readReg(core.INTENABLE1, 1, @tmp)
     case mask
         %000..%111:
-            mask <<= core.FLD_ALC_OVF
-        OTHER:
-            return tmp >> core.FLD_ALC_OVF
+            mask <<= core.ALC_OVF
+            writereg(core.INT_EN1, 1, @mask)
+        other:
+            c := 0
+            readreg(core.INT_EN1, 1, @c)
+            return (c >> core.ALC_OVF)
 
-    writeReg(core.INTENABLE1, 1, @mask)
 
-PUB Int2Mask(mask): tmp
+PUB int2_mask(mask=-2): c
 ' Set interrupt 2 mask
 '   Valid values:
 '       %00: Disabled
 '       %10: Die temperature ready interrupt enabled
 '       Default: %00
 '   Any other value polls the chip and returns the current setting
-    readReg(core.INTENABLE2, 1, @tmp)
     case mask
         %00, %10:
-            mask <<= core.FLD_DIE_TEMP_RDY_EN
-        OTHER:
-            return tmp >> core.FLD_DIE_TEMP_RDY_EN
+            mask <<= core.DIE_TEMP_RDY_EN
+            writereg(core.INT_EN2, 1, @mask)
+        other:
+            c := 0
+            readreg(core.INT_EN2, 1, @c)
+            return (c >> core.DIE_TEMP_RDY_EN)
 
-    writeReg(core.INTENABLE2, 1, @mask)
 
-PUB IRLEDCurrent(uA): tmp
+PUB ir_led_current(curr=-2): c
 ' Set IR LED current limit, in microAmperes
 '   Valid values: 0..51000 (default: 0)
 '   Any other value polls the chip and returns the current setting
-'   NOTE: Per the datasheet, actual measured LED current for each part can vary widely due to trimming methodology
-    tmp := $00
-    readReg(core.LED2PA, 1, @tmp)
-    case uA
+'   NOTE: Per the datasheet, actual measured LED current for each part can
+'       vary widely due to trimming methodology
+    case curr
         0..51_000:
-            uA /= 200
-        OTHER:
-            return tmp * 200
+            curr /= 200
+            writereg(core.LED2PA, 1, @curr)
+        other:
+            c := 0
+            readreg(core.LED2PA, 1, @c)
+            return (c * 200)
 
-    writeReg(core.LED2PA, 1, @uA)
 
-PUB LastIR(): result
+PUB last_ir(): s
 ' Return most recent IR sample data
-    result := _ir_sample
-    return
+    return _ir_sample
 
-PUB LastRed(): result
+
+PUB last_red(): s
 ' Return most recent RED sample data
-    result := _red_sample
-    return
+    return _red_sample
 
-PUB PPGDataReady(): result
+
+PUB pilot_led_current(curr=-2): c
+' Set Pilot LED current limit, in microAmperes
+'   Valid values: 0..51000 (default: 0)
+'   Any other value polls the chip and returns the current setting
+'   NOTE: Per the datasheet, actual measured LED current for each part can
+'       vary widely due to trimming methodology
+    case curr
+        0..51_000:
+            curr /= 200
+            writereg(core.PILOT_PA, 1, @curr)
+        other:
+            c:= 0
+            readreg(core.PILOT_PA, 1, @c)
+            return (c * 200)
+
+
+PUB ppg_data_rdy(): f
 ' Flag indicating an unread PPG data sample is ready
 '   Returns: TRUE (-1) if sample ready, FALSE otherwise
-    result := ((Interrupt1() >> 1) & 1) * TRUE
-    return
+    return ( (interrupt1() >> 1) & 1) == 1
 
-PUB RedLEDCurrent(uA): tmp
+
+PUB red_led_current(curr=-2): c
 ' Set Red LED current limit, in microAmperes
 '   Valid values: 0..51000 (default: 0)
 '   Any other value polls the chip and returns the current setting
-'   NOTE: Per the datasheet, actual measured LED current for each part can vary widely due to trimming methodology
-    tmp := $00
-    readReg(core.LED1PA, 1, @tmp)
-    case uA
+'   NOTE: Per the datasheet, actual measured LED current for each part can
+'       vary widely due to trimming methodology
+    case curr
         0..51_000:
-            uA /= 200
-        OTHER:
-            return tmp * 200
+            curr /= 200
+            writereg(core.LED1PA, 1, @curr)
+        other:
+            c := 0
+            readreg(core.LED1PA, 1, @c)
+            return (c * 200)
 
-    writeReg(core.LED1PA, 1, @uA)
 
-PUB OpMode(mode): tmp
+PUB opmode(mode=-2): c
 ' Set operation mode
 '   Valid values:
 '       HR (2): Heart-rate mode
 '       SPO2 (3): SpO2 mode
 '       MULTI_LED (7): TBD
 '   Any other value polls the chip and returns the current setting
-    tmp := $00
-    readReg(core.MODECONFIG, 1, @tmp)
+    c := 0
+    readreg(core.MODECFG, 1, @c)
     case mode
         HR, SPO2, MULTI_LED:
-        OTHER:
-            return tmp & core.BITS_MODE
+            mode := ((c & core.MODE_MASK) | mode)
+            writereg(core.MODECFG, 1, @mode)
+        other:
+            return (c & core.MODE_BITS)
 
-    tmp &= core.MASK_MODE
-    tmp := (tmp | mode) & core.MODECONFIG_MASK
-    writeReg(core.MODECONFIG, 1, @tmp)
 
-PUB Powered(enabled): result | tmp
+PUB powered(state=-2): c
 ' Enable sensor power
 '   Valid values: TRUE (-1 or 1), FALSE (0)
 '   Any other value polls the chip and returns the current setting
 '   NOTE: When powered down, all settings are retained by the sensor,
 '       and all interrupts are cleared.
-    tmp := $00
-    readReg(core.MODECONFIG, 1, @tmp)
-    case abs(enabled)
+    c := 0
+    readreg(core.MODECFG, 1, @c)
+    case abs(state)
         0, 1:
-            enabled := (abs(enabled) ^ 1) << core.FLD_SHDN
-        OTHER:
-            result := ((tmp >> core.FLD_SHDN) & 1) * TRUE
-            return
+            state := (abs(state) ^ 1) << core.SHDN
+            state := ((c & core.SHDN_MASK) | state)
+            writereg(core.MODECFG, 1, @state)
+        other:
+            return (((c >> core.SHDN) & 1) == 1)
 
-    tmp &= core.MASK_SHDN
-    tmp := (tmp | enabled) & core.MODECONFIG_MASK
-    writeReg(core.MODECONFIG, 1, @tmp)
 
-PUB Reset()
+PUB reset() | tmp
 ' Perform soft-reset
-    result := 1 << core.FLD_RESET
-    writeReg(core.MODECONFIG, 1, @result)
+    tmp := (1 << core.RESET)
+    writereg(core.MODECFG, 1, @tmp)
 
-PUB SampleAverages(nr_samples): tmp
+
+PUB sample_averages(nr_samples=-2): c
 ' Set averaging used per FIFO sample (number of samples)
 '   Valid values: *1, 2, 4, 8, 16, 32
 '   Any other value polls the chip and returns the current setting
 '   NOTE: A setting of 1 effectively disables averging
-    tmp := $00
-    readReg(core.FIFOCONFIG, 1, @tmp)
+    c := 0
+    readreg(core.FIFOCFG, 1, @c)
     case nr_samples
         1, 2, 4, 8, 16, 32:
-            nr_samples := lookdownz(nr_samples: 1, 2, 4, 8, 16, 32) << core.FLD_SMP_AVE
-        OTHER:
-            tmp := (tmp >> core.FLD_SMP_AVE) & core.BITS_SMP_AVE
-            return lookupz(tmp: 1, 2, 4, 8, 16, 32, 32, 32)
+            nr_samples := lookdownz(nr_samples: 1, 2, 4, 8, 16, 32)
+            nr_samples <<= core.SMP_AVE
+            nr_samples := ((c & core.SMP_AVE_MASK) | nr_samples)
+            writereg(core.FIFOCFG, 1, @nr_samples)
+        other:
+            c := (c >> core.SMP_AVE) & core.SMP_AVE_BITS
+            return lookupz(c: 1, 2, 4, 8, 16, 32, 32, 32)
 
-    tmp &= core.MASK_SMP_AVE
-    tmp := (tmp | nr_samples) & core.FIFOCONFIG_MASK
-    writeReg(core.FIFOCONFIG, 1, @tmp)
 
-PUB SpO2SampleRate(Hz): tmp
+PUB spO2_sample_rate(rate=-2): c
 ' Set SpO2 sensor sample rate, in Hz
 '   Valid values: *50, 100, 200, 400, 800, 1000, 1600, 3200
 '   Any other value polls the chip and returns the current setting
-    tmp := $00
-    readReg(core.SPO2CONFIG, 1, @tmp)
-    case Hz
+    c := 0
+    readreg(core.SPO2CFG, 1, @c)
+    case rate
         50, 100, 200, 400, 800, 1000, 1600, 3200:
-            Hz := lookdownz(Hz: 50, 100, 200, 400, 800, 1000, 1600, 3200) << core.FLD_SPO2_SR
-        OTHER:
-            tmp := (tmp >> core.FLD_SPO2_SR) & core.BITS_SPO2_SR
-            return lookupz(tmp: 50, 100, 200, 400, 800, 1000, 1600, 3200)
+            rate := lookdownz(rate: 50, 100, 200, 400, 800, 1000, 1600, 3200)
+            rate <<= core.SPO2_SR
+            rate := ((c & core.SPO2_SR_MASK) | rate)
+            writereg(core.SPO2CFG, 1, @rate)
+        other:
+            c := (c >> core.SPO2_SR) & core.SPO2_SR_BITS
+            return lookupz(c: 50, 100, 200, 400, 800, 1000, 1600, 3200)
 
-    tmp &= core.MASK_SPO2_SR
-    tmp := (tmp | Hz) & core.SPO2CONFIG_MASK
-    writeReg(core.SPO2CONFIG, 1, @tmp)
 
-PUB SpO2Scale(range): tmp
+PUB spO2_scale(range=-2): c
 ' Set SpO2 sensor full-scale range, in nanoAmperes
 '   Valid values: *2048, 4096, 8192, 16384
 '   Any other value polls the chip and returns the current setting
-    tmp := $00
-    readReg(core.SPO2CONFIG, 1, @tmp)
+    c := 0
+    readreg(core.SPO2CFG, 1, @c)
     case range
         2048, 4096, 8192, 16384:
-            range := lookdownz(range: 2048, 4096, 8192, 16384) << core.FLD_SPO2_ADC_RGE
-        OTHER:
-            tmp := (tmp >> core.FLD_SPO2_ADC_RGE) & core.BITS_SPO2_ADC_RGE
-            return lookupz(tmp: 2048, 4096, 8192, 16384)
+            range := lookdownz(range: 2048, 4096, 8192, 16384)
+            range <<= core.SPO2_ADC_RGE
+            range := ((c & core.SPO2_ADC_RGE_MASK) | range)
+            writereg(core.SPO2CFG, 1, @range)
+        other:
+            c := ((c >> core.SPO2_ADC_RGE) & core.SPO2_ADC_RGE_BITS)
+            return lookupz(c: 2048, 4096, 8192, 16384)
 
-    tmp &= core.MASK_SPO2_ADC_RGE
-    tmp := (tmp | range) & core.SPO2CONFIG_MASK
-    writeReg(core.SPO2CONFIG, 1, @tmp)
 
-PUB Temperature(): result | int, fract, tmp
-' Read die temperature
-'   Returns: Temperature in centi-degrees Celsius (signed)
-    int := fract := 0
-    tmp := %1
-    writeReg(core.DIETEMPCONFIG, 1, @tmp)                       ' Trigger a measurement
+PUB temp_data(): t | tmp
+' Read temperature ADC data
+'   Returns: s12
+    tmp := 1
+    writereg(core.DIETEMPCFG, 1, @tmp)          ' Trigger a measurement
 
-    readReg(core.DIETEMP_INT, 1, @int)                          ' LSB = 1C (signed 8b)
-    readReg(core.DIETEMP_FRACT, 1, @fract)                      ' LSB = +0.0625C (always additive)
+    t := 0
+    readreg(core.DIETEMP_INT, 2, @t)
 
-    int := (int signx 7) * 1_0000                                               ' Scale up to
-    fract *= 0_0625                                             '   preserve precision
 
-    result := (int + fract) / 100                                  ' Scale back down to centidegrees
-    return
+PUB temp_word2deg(temp_adc): t | int, fract
+' Convert temperature ADC word to temperature
+'   Returns: temperature, in hundredths of a degree, in chosen scale
+'   bits 11..4: integer (LSB = 1C), bits 3..0: fractional (LSB = 0.0625C)
+    int := temp_adc.byte[0] signx 7             ' extend sign
+    fract := temp_adc.byte[1]
+    int *= 1_0000                               ' Scale up to
+    fract *= 0_0625                             '   preserve precision
+    t := (int + fract) / 100
+    case _temp_scale
+        C:
+            return t
+        F:
+            return ((t * 9_00) / 5_00) + 32_00
+        other:
+            return FALSE
 
-PRI readReg(reg_nr, nr_bytes, buff_addr) | cmd_packet, tmp
-'' Read num_bytes from the slave device into the address stored in buff_addr
-    case reg_nr                                                    'Basic register validation
+
+PRI readreg(reg_nr, nr_bytes, ptr_buff) | cmd_pkt, tmp
+' Read nr_bytes from the device into ptr_buff
+    case reg_nr                                 ' validate register #
         $00..$0A, $0C, $0D, $11, $12, $1F..$21, $FE, $FF:
-            cmd_packet.byte[0] := SLAVE_WR
-            cmd_packet.byte[1] := reg_nr
+            cmd_pkt.byte[0] := SLAVE_WR
+            cmd_pkt.byte[1] := reg_nr
             i2c.start()
-            repeat tmp from 0 to 1
-                i2c.write(cmd_packet.byte[tmp])
+            i2c.wrblock_lsbf(@cmd_pkt, 2)
             i2c.start()
-            i2c.write (SLAVE_RD)
-            repeat tmp from 0 to nr_bytes-1
-                byte[buff_addr][tmp] := i2c.read(tmp == nr_bytes-1)
+            i2c.write(SLAVE_RD)
+            i2c.rdblock_lsbf(ptr_buff, nr_bytes, i2c.NAK)
             i2c.stop()
-        OTHER:
+        other:
             return
 
-PRI writeReg(reg_nr, nr_bytes, buff_addr) | cmd_packet, tmp
-'' Write num_bytes to the slave device from the address stored in buff_addr
-    case reg_nr                                                    'Basic register validation
+
+PRI writereg(reg_nr, nr_bytes, ptr_buff) | cmd_pkt, tmp
+' Write nr_bytes to the device from ptr_buff
+    case reg_nr                                 ' validate register #
         $02..$0D, $11, $12, $21:
-            cmd_packet.byte[0] := SLAVE_WR
-            cmd_packet.byte[1] := reg_nr
+            cmd_pkt.byte[0] := SLAVE_WR
+            cmd_pkt.byte[1] := reg_nr
             i2c.start()
-            repeat tmp from 0 to 1
-                i2c.write(cmd_packet.byte[tmp])
-            repeat tmp from 0 to nr_bytes-1
-                i2c.write (byte[buff_addr][tmp])
+            i2c.wrblock_lsbf(@cmd_pkt, 2)
+            i2c.wrblock_lsbf(ptr_buff, nr_bytes)
             i2c.stop()
-        OTHER:
+        other:
             return
 
 
 DAT
 {
-    --------------------------------------------------------------------------------------------------------
-    TERMS OF USE: MIT License
+Copyright 2024 Jesse Burt
 
-    Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
-    associated documentation files (the "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the
-    following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-    The above copyright notice and this permission notice shall be included in all copies or substantial
-    portions of the Software.
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
 
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
-    LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-    --------------------------------------------------------------------------------------------------------
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 }
+
