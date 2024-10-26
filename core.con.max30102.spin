@@ -82,6 +82,7 @@ CON
     LED2PA                  = $0D
 ' RESERVED                  = $0E
 ' RESERVED                  = $0F
+    PILOT_PA                = $10
     LEDMODECTRL12           = $11
     LEDMODECTRL34           = $12
 ' RESERVED                  = $13

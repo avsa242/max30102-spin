@@ -21,15 +21,15 @@ CON
     SER_BAUD    = 115_200
     LED         = cfg#LED1
 
-    SCL_PIN     = 0
-    SDA_PIN     = 1
+    SCL_PIN     = 2
+    SDA_PIN     = 3
     I2C_HZ      = 400_000
 
     VGA_PINGROUP= 2                             ' 0, 1, 2, 3 (base = group * 8)
 ' --
 
-    WIDTH       = vga#DISP_WIDTH
-    HEIGHT      = vga#DISP_HEIGHT
+    WIDTH       = vga#WIDTH
+    HEIGHT      = vga#HEIGHT
     BPL         = WIDTH * vga#BYTESPERPX
     BUFFSZ      = (WIDTH * HEIGHT)
     XMAX        = WIDTH - 1
@@ -39,7 +39,7 @@ CON
 
 OBJ
 
-    cfg         : "core.con.boardcfg.quickstart-hib"
+    cfg         : "boardcfg.quickstart-hib"
     ser         : "com.serial.terminal.ansi"
     time        : "time"
     max30102    : "sensor.bio.pulseoximeter.max30102.i2c"
@@ -53,7 +53,6 @@ VAR
     long _red_data, _ir_data, _last_red, _last_ir, _die_temp
     long _key_stack[50], _acq_stack[50]
     byte _max30102_cog
-    byte _framebuff[BUFFSZ]
 
 PUB Main{} | x
 
@@ -75,7 +74,7 @@ PUB Main{} | x
 
 ' Scroll View
     repeat
-        vga.waitvsync{}
+        vga.wait_vsync{}
         vga.plot(XMAX-2, _ir_data #> 0, vga#MAX_COLOR)
         vga.plot(XMAX-2, _red_data #> 0, %%300)
         vga.scrollleft(0, 0, XMAX, YMAX)
@@ -85,13 +84,13 @@ PUB Main{} | x
 PUB DisplaySettings{}
 
     ser.position(0, 7)
-    ser.printf(string("IR: %d, Red: %d     \n"), max30102.lastir, max30102.lastred, 0, 0, 0, 0)
-    ser.printf(string("Red current: %d  \n"), _i_red, 0, 0, 0, 0, 0)
-    ser.printf(string("IR current: %d  \n"), _i_ir, 0, 0, 0, 0, 0)
-    ser.printf(string("IR offset: %d  \n"), _ir_offset, 0, 0, 0, 0, 0)
-    ser.printf(string("Red offset: %d  \n"), _red_offset, 0, 0, 0, 0, 0)
-    ser.printf(string("Div: %d\n"), _div, 0, 0, 0, 0, 0)
-    ser.printf(string("Die temp: %d\n"), _die_temp, 0, 0, 0, 0, 0)
+    ser.printf2(string("IR: %d, Red: %d     \n"), max30102.lastir, max30102.lastred)
+    ser.printf1(string("Red current: %d  \n"), _i_red)
+    ser.printf1(string("IR current: %d  \n"), _i_ir)
+    ser.printf1(string("IR offset: %d  \n"), _ir_offset)
+    ser.printf1(string("Red offset: %d  \n"), _red_offset)
+    ser.printf1(string("Div: %d\n"), _div)
+    ser.printf1(string("Die temp: %d\n"), _die_temp)
     _settings_changed := FALSE
 
 PUB cog_acquire{} | tmp[2], irlc, irhc, rlc, rhc
@@ -194,7 +193,7 @@ PUB Setup{}
     ser.clear{}
     ser.strln(string("Serial terminal started"))
 
-    vga.start(VGA_PINGROUP, WIDTH, HEIGHT, @_framebuff)
+    vga.startx(VGA_PINGROUP, WIDTH, HEIGHT, 0)
         ser.str(string("VGA Bitmap driver started", ser#CR, ser#LF))
 '        vga.FontAddress(fnt.BaseAddr)
 '        vga.FontSize(6, 8)

@@ -78,6 +78,7 @@ PUB Preset_Pulse{}
 ' Preset settings for pulse/HR measurement
     reset{}
     powered(TRUE)
+    opmode(HR)
     'XXX fill in
 
 PUB Preset_OxySat{}
@@ -104,7 +105,7 @@ PUB ADCRes(sres): curr_res
             curr_res &= core#LED_PW_BITS
             return lookupz(curr_res: 15, 16, 17, 18)
 
-    sres := ((curr_res & core#LED_PW) | sres)
+    sres := ((curr_res & core#LED_PW_MASK) | sres)
     writereg(core#SPO2CFG, 1, @sres)
 
 PUB DeviceID{}: id
@@ -141,6 +142,32 @@ PUB FIFOMode(mode): curr_mode
     mode := ((curr_mode & core#FIFO_RLOV_EN_MASK) | mode)
     writereg(core#FIFOCFG, 1, @mode)
 
+PUB FIFOOverFlowCtr(val): curr_val
+' Set FIFO overflow counter
+'   val: overflow threshold
+'   Returns:
+'       current setting, if val is invalid
+    case val
+        0..31:
+            writereg(core#OVERFL_CNT, 1, @val)
+        other:
+            curr_val := 0
+            readreg(core#OVERFL_CNT, 1, @curr_val)
+            return
+
+PUB FIFORdPtr(rd_loc): curr_loc
+' Set FIFO read pointer
+'   rd_loc: address within FIFO to set read pointer to
+'   Returns:
+'       current setting, if rd_loc is invalid
+    case rd_loc
+        0..31:
+            writereg(core#FIFO_RDPTR, 1, @rd_loc)
+        other:
+            curr_loc := 0
+            readreg(core#FIFO_RDPTR, 1, @curr_loc)
+            return
+
 PUB FIFORead(ptr_data) | tmp[2]
 ' Read PPG data from the FIFO
     readreg(core#FIFODATA, 6, @tmp)
@@ -154,6 +181,11 @@ PUB FIFOSamplesLost{}: nr_smp
 '   Returns: 0..31
     readreg(core#OVERFL_CNT, 1, @nr_smp)
 
+PUB fifo_clr_overflow() | tmp 'xxx tentatively named
+' Clear FIFO overflow flag
+    tmp := 0
+    writereg(core#OVERFL_CNT, 1, @tmp)
+
 PUB FIFOThreshold(level): curr_lvl
 ' Set number of unread level in FIFO required to assert an interrupt
 '   Valid values: 17..*32
@@ -166,7 +198,7 @@ PUB FIFOThreshold(level): curr_lvl
         other:
             return (curr_lvl & core#FIFO_A_FULL_BITS)
 
-    level := ((curr_lvl & core#FIFO_A_FULL) | level)
+    level := ((curr_lvl & core#FIFO_A_FULL_MASK) | level)
     writereg(core#FIFOCFG, 1, @level)
 
 PUB FIFOUnreadSamples{}: nr_samples | rd_ptr, wr_ptr
@@ -176,6 +208,19 @@ PUB FIFOUnreadSamples{}: nr_samples | rd_ptr, wr_ptr
     readreg(core#FIFO_RDPTR, 1, @rd_ptr)
 
     return (||( 16 + wr_ptr - rd_ptr ) // 16)
+
+PUB FIFOWrPtr(wr_loc): curr_loc
+' Set the FIFO write pointer
+'   wr_loc: address within the FIFO to set the write pointer
+'   Returns:
+'       current setting, if wr_loc is invalid
+    case wr_loc
+        0..31:
+            writereg(core#FIFO_WRPTR, 1, @wr_loc)
+        other:
+            curr_loc := 0
+            readreg(core#FIFO_WRPTR, 1, @curr_loc)
+            return
 
 PUB Interrupt1{}: status
 ' Get interrupt 1 status
@@ -248,6 +293,21 @@ PUB LastIR{}: ir_sam
 PUB LastRed{}: red_sam
 ' Return most recent RED sample data
     return _red_sample
+
+PUB PilotLEDCurrent(curr) | curr_set
+' Set Pilot LED current limit, in microAmperes
+'   Valid values: 0..51000 (default: 0)
+'   Any other value polls the chip and returns the current setting
+'   NOTE: Per the datasheet, actual measured LED current for each part can
+'       vary widely due to trimming methodology
+    case curr
+        0..51_000:
+            curr /= 200
+            writereg(core#PILOT_PA, 1, @curr)
+        other:
+            curr_set := 0
+            readreg(core#PILOT_PA, 1, @curr_set)
+            return curr_set * 200
 
 PUB PPGDataReady{}: flag
 ' Flag indicating an unread PPG data sample is ready
