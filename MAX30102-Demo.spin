@@ -1,11 +1,9 @@
 {
 ----------------------------------------------------------------------------------------------------
     Filename:       MAX30102-Demo.spin
-    Description:    Preliminary demo of the MAX30102 driver
-        Displays an auto-adjusting chart of
-        SpO2 and HR data (raw ADC counts only)
+    Description:    Demo of the MAX30102 driver
     Author:         Jesse Burt
-    Started:        Apr 2, 2020
+    Started:        Oct 26, 2024
     Updated:        Oct 26, 2024
     Copyright (c) 2024 - See end of file for terms of use.
 ----------------------------------------------------------------------------------------------------
@@ -16,157 +14,30 @@ CON
     _clkmode    = xtal1+pll16x
     _xinfreq    = 5_000_000
 
-    PRESCALE    = 10
-
 
 OBJ
 
     time:   "time"
     ser:    "com.serial.terminal.ansi" | SER_BAUD=115_200
     sensor: "sensor.bio.pulse-ox.max30102" | SCL=28, SDA=29, I2C_FREQ=100_000
-    vga:    "display.vga.bitmap.160x120" | PIN_GRP=2    ' (0..3, base pin = PIN_GRP*8)
 
 
-VAR
-
-    long _settings_changed
-    long _i_red, _i_ir, _ir_offset, _red_offset, _div
-    long _red_data, _ir_data, _last_red, _last_ir, _die_temp
-    long _key_stack[50], _acq_stack[50]
-    byte _max30102_cog
-
-
-PUB main() | x
+PUB main() | tmp[2]
 
     setup()
 
-    vga.fgcolor(vga.MAX_COLOR)
-
-    repeat
-        repeat x from 0 to vga.XMAX
-            vga.line(x-1, vga.YMAX-_last_ir, x, vga.YMAX-_ir_data, vga.MAX_COLOR)
-            vga.line(x-1, vga.YMAX-_last_red, x, vga.YMAX-_red_data, %%300)
-'            vga.plot(x, _ir_data #> 0, vga.MAX_COLOR)
-'            vga.plot(x, _red_data #> 0, %%300)
-            if ( _settings_changed )
-                display_settings()
-                quit                            ' settings changed; restart
-            time.msleep(10)
-            vga.box(x+1, 0, x+5, vga.YMAX, 0, TRUE) ' erase ahead of the plot
-
-' Scroll View
-    repeat
-        vga.wait_vsync()
-        vga.plot(vga.XMAX-2, _ir_data #> 0, vga.MAX_COLOR)
-        vga.plot(vga.XMAX-2, _red_data #> 0, %%300)
-        vga.scroll_left(0, 0, vga.XMAX, vga.YMAX)
-        if ( _settings_changed )
-            display_settings()
-
-
-PUB display_settings()
-
-    ser.pos_xy(0, 7)
-    ser.printf(@"IR: %d, Red: %d     \n\r", sensor.last_ir(), sensor.last_red() )
-    ser.printf(@"Red current: %d  \n\r", _i_red)
-    ser.printf(@"IR current: %d  \n\r", _i_ir)
-    ser.printf(@"IR offset: %d  \n\r", _ir_offset)
-    ser.printf(@"Red offset: %d  \n\r", _red_offset)
-    ser.printf(@"Div: %d\n\r", _div)
-    ser.printf(@"Die temp: %d\n\r", _die_temp)
-    _settings_changed := FALSE
-
-
-PUB cog_acquire() | tmp[2], irlc, irhc, rlc, rhc
-
-    _max30102_cog := sensor.start()
-
-' Initial settings
-    _i_red := 4_000                             ' Red LED current (uA)
-    _i_ir := 4_000                              ' IR LED current
-    _ir_offset := 37_000
-    _red_offset := 32_000
-    _div := 70
-
     sensor.preset_oxysat()
-    sensor.red_led_current(_i_red)
-    sensor.ir_led_current(_i_ir)
+    sensor.red_led_current(4_000)
+    sensor.ir_led_current(4_000)
 
     repeat
         repeat
         until sensor.ppg_data_rdy()
+        tmp[0] := tmp[1] := 0
         sensor.fifo_read(@tmp)
-        _last_ir := _ir_data
-        _last_red := _red_data
-        _ir_data := ((sensor.last_ir()-_ir_offset)*PRESCALE)/_div    ' Prescale to preserve precision
-        _red_data := ((sensor.last_red()-_red_offset)*PRESCALE)/_div ' then shrink it down
-
-                                                ' Auto-scaling:
-        if ( _ir_data =< 0 )                    ' track how long data goes off-screen. If the
-            irlc++                              '   threshold is reached, change the visual offset
-        if ( irlc => 10 )                       '   to bring the chart back on-screen
-            _ir_offset -= 250
-            irlc := 0
-            _settings_changed := TRUE           ' Notify the main cog
-        if ( _red_data =< 0 )
-            rhc++
-        if ( rhc => 10 )
-            _red_offset -= 250
-            rhc := 0
-            _settings_changed := TRUE
-        if ( _ir_data => vga.YMAX )
-            irhc++
-        if ( irhc => 10 )
-            _ir_offset += 250
-            irhc := 0
-            _settings_changed := TRUE
-        if ( _red_data => vga.YMAX )
-            rlc++
-        if ( rlc => 10 )
-            _red_offset += 250
-            rlc := 0
-            _settings_changed := TRUE
-        if ( _settings_changed )                ' If any settings are changed, update the sensor's
-            sensor.red_led_current(_i_red)      '   LED current limits - they might've changed
-            sensor.ir_led_current(_i_ir)
-            _die_temp := sensor.temperature()   ' Update sensor die temperature
-
-
-PUB cog_key_input() | key
-
-    repeat
-        key := ser.getchar()
-            case key
-                "=":                            ' Change LED current (both IR and red)
-                    _i_red := (_i_red + 0_200) <# 51_000
-                    _i_ir := (_i_ir + 0_200) <# 51_000
-                    sensor.red_led_current(_i_red)
-                    sensor.ir_led_current(_i_ir)
-                "-":
-                    _i_red := (_i_red - 0_200) #> 0
-                    _i_ir := (_i_ir - 0_200) #> 0
-                    sensor.red_led_current(_i_red)
-                    sensor.ir_led_current(_i_ir)
-
-                "I":                            ' Manually change IR data chart offset
-                    _ir_offset := (_ir_offset + 250) <# 2_621_440
-                "i":
-                    _ir_offset := (_ir_offset - 250) #> 65_000
-
-                "R":                            ' Manually change Red data chart offset
-                    _red_offset := (_red_offset + 250) <# 2_621_440
-                "r":
-                    _red_offset := (_red_offset - 250) #> 65_000
-
-                "D":                            ' Manually change chart scale divisor
-                    _div := (_div + 1) <# 10_0
-                "d":
-                    _div := (_div - 1) #> 1_0
-                " ":
-                other:
-                    next
-
-            _settings_changed := TRUE
+        ser.pos_xy(0, 3)
+        ser.printf(@"IR data: %04.4x\n\r", sensor.last_ir() )
+        ser.printf(@"Red data: %04.4x\n\r", sensor.last_red() )
 
 
 PUB setup()
@@ -176,16 +47,11 @@ PUB setup()
     ser.clear()
     ser.strln(@"Serial terminal started")
 
-    vga.start()
-    ser.strln(@"VGA Bitmap driver started")
-    vga.clear()
-
-    cognew(cog_key_input(), @_key_stack)
-    cognew(cog_acquire(), @_acq_stack)
-
-    repeat
-    until _max30102_cog                         ' wait for the sensor cog to be ready
-    ser.strln(@"MAX30102 driver started")
+    if ( sensor.start() )
+        ser.strln(@"MAX30102 driver started")
+    else
+        ser.strln(@"MAX30102 driver failed to start - halting")
+        repeat
 
 
 DAT
