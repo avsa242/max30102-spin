@@ -119,23 +119,19 @@ PUB adc_res(sres=-2): c
 ' Set sensor ADC resolution, in bits
 '   Valid values: *15, 16, 17, 18
 '   Any other value polls the chip and returns the current setting
-    c := 0
-    readreg(core.SPO2CFG, 1, @c)
+    c := readreg(core.SPO2CFG)
     case sres
         15, 16, 17, 18:
-            sres := lookdownz(sres: 15, 16, 17, 18) & core.LED_PW_BITS
-            sres := ((c & core.LED_PW_MASK) | sres)
-            writereg(core.SPO2CFG, 1, @sres)
+            sres := ( (c & core.LED_PW_MASK) | lookdownz(sres: 15, 16, 17, 18) )
+            writereg(core.SPO2CFG, sres)
         other:
-            c &= core.LED_PW_BITS
-            return lookupz(c: 15, 16, 17, 18)
+            return lookupz(c & core.LED_PW_BITS: 15, 16, 17, 18)
 
 
 PUB dev_id(): id
 ' Read device identification
 '   Returns: $15
-    id := 0
-    readreg(core.REVID, 2, @id)
+    id := readreg(core.REVID, 2)
     return id.byte[1]
 
 
@@ -158,13 +154,11 @@ PUB fifo_mode(mode=-2): c
 '           until new data is read
 '       STREAM (1): If FIFO becomes completely filled, new data will
 '           overwrite old data (oldest data first)
-    c := 0
-    readreg(core.FIFOCFG, 1, @c)
+    c := readreg(core.FIFOCFG)
     case mode
         FIFO, STREAM:
-            mode <<= core.FIFO_RLOV_EN
-            mode := ((c & core.FIFO_RLOV_EN_MASK) | mode)
-            writereg(core.FIFOCFG, 1, @mode)
+            mode := ( (c & core.FIFO_RLOV_EN_MASK) | (mode << core.FIFO_RLOV_EN) )
+            writereg(core.FIFOCFG, mode)
         other:
             return ((c >> core.FIFO_RLOV_EN) & 1)
 
@@ -176,11 +170,9 @@ PUB fifo_overflow_ctr(val=-2): c
 '       current setting, if val is invalid
     case val
         0..31:
-            writereg(core.OVERFL_CNT, 1, @val)
+            writereg(core.OVERFL_CNT, val)
         other:
-            c := 0
-            readreg(core.OVERFL_CNT, 1, @c)
-            return
+            return readreg(core.OVERFL_CNT)
 
 
 PUB fifo_rd_ptr(rd_loc=-2): c
@@ -190,16 +182,22 @@ PUB fifo_rd_ptr(rd_loc=-2): c
 '       current setting, if rd_loc is invalid
     case rd_loc
         0..31:
-            writereg(core.FIFO_RDPTR, 1, @rd_loc)
+            writereg(core.FIFO_RDPTR, rd_loc)
         other:
-            c := 0
-            readreg(core.FIFO_RDPTR, 1, @c)
-            return
+            return readreg(core.FIFO_RDPTR)
 
 
 PUB fifo_read(ptr_data) | tmp[2]
 ' Read PPG data from the FIFO
-    readreg(core.FIFODATA, 6, @tmp)
+    tmp[0] := tmp[1] := 0
+    i2c.start()
+    i2c.write(SLAVE_WR)
+    i2c.write(core.FIFODATA)
+    i2c.start()
+    i2c.write(SLAVE_RD)
+    i2c.rdblock_lsbf(@tmp, 6, i2c.NAK)
+    i2c.stop()
+
     _ir_sample := (tmp.byte[0] << 16 | tmp.byte[1] << 8 | tmp.byte[2]) & $3FFFF
     _red_sample := (tmp.byte[3] << 16 | tmp.byte[4] << 8 | tmp.byte[5]) & $3FFFF
     long[ptr_data][0] := _ir_sample
@@ -209,27 +207,23 @@ PUB fifo_read(ptr_data) | tmp[2]
 PUB fifo_samples_lost(): n
 ' Number of FIFO samples lost
 '   Returns: 0..31
-    n := 0
-    readreg(core.OVERFL_CNT, 1, @n)
+    return readreg(core.OVERFL_CNT)
 
 
 PUB fifo_clr_overflow() | tmp 'xxx tentatively named
 ' Clear FIFO overflow flag
-    tmp := 0
-    writereg(core.OVERFL_CNT, 1, @tmp)
+    writereg(core.OVERFL_CNT, 0)
 
 
 PUB fifo_thresh(level=-2): c
 ' Set number of unread level in FIFO required to assert an interrupt
 '   Valid values: 17..*32
 '   Any other value polls the chip and returns the current setting
-    c := 0
-    readreg(core.FIFOCFG, 1, @c)
+    c := readreg(core.FIFOCFG)
     case level
         17..32:
-            level := 32-level
-            level := ((c & core.FIFO_A_FULL_MASK) | level)
-            writereg(core.FIFOCFG, 1, @level)
+            level := ( (c & core.FIFO_A_FULL_MASK) | (32-level) )
+            writereg(core.FIFOCFG, level)
         other:
             return (c & core.FIFO_A_FULL_BITS)
 
@@ -238,8 +232,8 @@ PUB fifo_unread_samples(): n | rd_ptr, wr_ptr
 ' Number of undread samples in FIFO
 '   Returns: Integer
     rd_ptr := wr_ptr := 0
-    readreg(core.FIFO_WRPTR, 1, @wr_ptr)
-    readreg(core.FIFO_RDPTR, 1, @rd_ptr)
+    wr_ptr := readreg(core.FIFO_WRPTR)
+    rd_ptr := readreg(core.FIFO_RDPTR)
 
     return ( ||( 16 + wr_ptr - rd_ptr ) // 16 )
 
@@ -251,11 +245,9 @@ PUB fifo_wr_ptr(wr_loc=-2): c
 '       current setting, if wr_loc is invalid
     case wr_loc
         0..31:
-            writereg(core.FIFO_WRPTR, 1, @wr_loc)
+            writereg(core.FIFO_WRPTR, wr_loc)
         other:
-            c := 0
-            readreg(core.FIFO_WRPTR, 1, @c)
-            return
+            return readreg(core.FIFO_WRPTR)
 
 
 PUB interrupt1(): s
@@ -265,16 +257,13 @@ PUB interrupt1(): s
 '       1: New data sample ready
 '       0: Ambient light cancellation overflow
 '           (ambient light is affecting reading)
-    s := 0
-    readreg(core.INTSTATUS1, 2, @s)
-    s >>= core.ALC_OVF
+    return readreg(core.INTSTATUS1, 2) >> core.ALC_OVF
 
 
 PUB interrupt2(): s
 ' Get interrupt 2 status
 '   1: Die temperature measurement ready
-    s := 0
-    readreg(core.INTSTATUS2, 2, @s)
+    return readreg(core.INTSTATUS2, 2)
 
 
 PUB int1_mask(mask=-2): c
@@ -288,12 +277,9 @@ PUB int1_mask(mask=-2): c
 '   Any other value polls the chip and returns the current setting
     case mask
         %000..%111:
-            mask <<= core.ALC_OVF
-            writereg(core.INT_EN1, 1, @mask)
+            writereg(core.INT_EN1, (mask << core.ALC_OVF) )
         other:
-            c := 0
-            readreg(core.INT_EN1, 1, @c)
-            return (c >> core.ALC_OVF)
+            return readreg(core.INT_EN1) >> core.ALC_OVF
 
 
 PUB int2_mask(mask=-2): c
@@ -305,12 +291,9 @@ PUB int2_mask(mask=-2): c
 '   Any other value polls the chip and returns the current setting
     case mask
         %00, %10:
-            mask <<= core.DIE_TEMP_RDY_EN
-            writereg(core.INT_EN2, 1, @mask)
+            writereg(core.INT_EN2, (mask << core.DIE_TEMP_RDY_EN) )
         other:
-            c := 0
-            readreg(core.INT_EN2, 1, @c)
-            return (c >> core.DIE_TEMP_RDY_EN)
+            return readreg(core.INT_EN2) >> core.DIE_TEMP_RDY_EN
 
 
 PUB ir_led_current(curr=-2): c
@@ -322,11 +305,9 @@ PUB ir_led_current(curr=-2): c
     case curr
         0..51_000:
             curr /= 200
-            writereg(core.LED2PA, 1, @curr)
+            writereg(core.LED2PA, curr)
         other:
-            c := 0
-            readreg(core.LED2PA, 1, @c)
-            return (c * 200)
+            return ( readreg(core.LED2PA) * 200 )
 
 
 PUB last_ir(): s
@@ -347,12 +328,9 @@ PUB pilot_led_current(curr=-2): c
 '       vary widely due to trimming methodology
     case curr
         0..51_000:
-            curr /= 200
-            writereg(core.PILOT_PA, 1, @curr)
+            writereg(core.PILOT_PA, (curr / 200) )
         other:
-            c:= 0
-            readreg(core.PILOT_PA, 1, @c)
-            return (c * 200)
+            return ( readreg(core.PILOT_PA) * 200 )
 
 
 PUB ppg_data_rdy(): f
@@ -369,12 +347,9 @@ PUB red_led_current(curr=-2): c
 '       vary widely due to trimming methodology
     case curr
         0..51_000:
-            curr /= 200
-            writereg(core.LED1PA, 1, @curr)
+            writereg(core.LED1PA, (curr / 200) )
         other:
-            c := 0
-            readreg(core.LED1PA, 1, @c)
-            return (c * 200)
+            return ( readreg(core.LED1PA) * 200 )
 
 
 PUB opmode(mode=-2): c
@@ -384,12 +359,10 @@ PUB opmode(mode=-2): c
 '       SPO2 (3): SpO2 mode
 '       MULTI_LED (7): TBD
 '   Any other value polls the chip and returns the current setting
-    c := 0
-    readreg(core.MODECFG, 1, @c)
+    c := readreg(core.MODECFG)
     case mode
         HR, SPO2, MULTI_LED:
-            mode := ((c & core.MODE_MASK) | mode)
-            writereg(core.MODECFG, 1, @mode)
+            writereg(core.MODECFG, ( (c & core.MODE_MASK) | mode) )
         other:
             return (c & core.MODE_BITS)
 
@@ -400,21 +373,18 @@ PUB powered(state=-2): c
 '   Any other value polls the chip and returns the current setting
 '   NOTE: When powered down, all settings are retained by the sensor,
 '       and all interrupts are cleared.
-    c := 0
-    readreg(core.MODECFG, 1, @c)
+    c := readreg(core.MODECFG)
     case ||(state)
         0, 1:
             state := (||(state) ^ 1) << core.SHDN
-            state := ((c & core.SHDN_MASK) | state)
-            writereg(core.MODECFG, 1, @state)
+            writereg(core.MODECFG, ( (c & core.SHDN_MASK) | state) )
         other:
-            return (((c >> core.SHDN) & 1) == 1)
+            return ( ( (c >> core.SHDN) & 1) == 1)
 
 
-PUB reset() | tmp
+PUB reset()
 ' Perform soft-reset
-    tmp := (1 << core.RESET)
-    writereg(core.MODECFG, 1, @tmp)
+    writereg(core.MODECFG, (1 << core.RESET) )
 
 
 PUB sample_averages(nr_samples=-2): c
@@ -422,16 +392,13 @@ PUB sample_averages(nr_samples=-2): c
 '   Valid values: *1, 2, 4, 8, 16, 32
 '   Any other value polls the chip and returns the current setting
 '   NOTE: A setting of 1 effectively disables averging
-    c := 0
-    readreg(core.FIFOCFG, 1, @c)
+    c := readreg(core.FIFOCFG)
     case nr_samples
         1, 2, 4, 8, 16, 32:
-            nr_samples := lookdownz(nr_samples: 1, 2, 4, 8, 16, 32)
-            nr_samples <<= core.SMP_AVE
-            nr_samples := ((c & core.SMP_AVE_MASK) | nr_samples)
-            writereg(core.FIFOCFG, 1, @nr_samples)
+            nr_samples := lookdownz(nr_samples: 1, 2, 4, 8, 16, 32) << core.SMP_AVE
+            writereg(core.FIFOCFG, ( (c & core.SMP_AVE_MASK) | nr_samples) )
         other:
-            c := (c >> core.SMP_AVE) & core.SMP_AVE_BITS
+            c := ( (c >> core.SMP_AVE) & core.SMP_AVE_BITS )
             return lookupz(c: 1, 2, 4, 8, 16, 32, 32, 32)
 
 
@@ -439,16 +406,13 @@ PUB spO2_sample_rate(rate=-2): c
 ' Set SpO2 sensor sample rate, in Hz
 '   Valid values: *50, 100, 200, 400, 800, 1000, 1600, 3200
 '   Any other value polls the chip and returns the current setting
-    c := 0
-    readreg(core.SPO2CFG, 1, @c)
+    c := readreg(core.SPO2CFG)
     case rate
         50, 100, 200, 400, 800, 1000, 1600, 3200:
-            rate := lookdownz(rate: 50, 100, 200, 400, 800, 1000, 1600, 3200)
-            rate <<= core.SPO2_SR
-            rate := ((c & core.SPO2_SR_MASK) | rate)
-            writereg(core.SPO2CFG, 1, @rate)
+            rate := lookdownz(rate: 50, 100, 200, 400, 800, 1000, 1600, 3200) << core.SPO2_SR
+            writereg(core.SPO2CFG, ( (c & core.SPO2_SR_MASK) | rate) )
         other:
-            c := (c >> core.SPO2_SR) & core.SPO2_SR_BITS
+            c := ( (c >> core.SPO2_SR) & core.SPO2_SR_BITS )
             return lookupz(c: 50, 100, 200, 400, 800, 1000, 1600, 3200)
 
 
@@ -456,27 +420,21 @@ PUB spO2_scale(range=-2): c
 ' Set SpO2 sensor full-scale range, in nanoAmperes
 '   Valid values: *2048, 4096, 8192, 16384
 '   Any other value polls the chip and returns the current setting
-    c := 0
-    readreg(core.SPO2CFG, 1, @c)
+    c := readreg(core.SPO2CFG)
     case range
         2048, 4096, 8192, 16384:
-            range := lookdownz(range: 2048, 4096, 8192, 16384)
-            range <<= core.SPO2_ADC_RGE
-            range := ((c & core.SPO2_ADC_RGE_MASK) | range)
-            writereg(core.SPO2CFG, 1, @range)
+            range := lookdownz(range: 2048, 4096, 8192, 16384) << core.SPO2_ADC_RGE
+            writereg(core.SPO2CFG, ( (c & core.SPO2_ADC_RGE_MASK) | range) )
         other:
             c := ((c >> core.SPO2_ADC_RGE) & core.SPO2_ADC_RGE_BITS)
             return lookupz(c: 2048, 4096, 8192, 16384)
 
 
-PUB temp_data(): t | tmp
+PUB temp_data(): t
 ' Read temperature ADC data
 '   Returns: s12
-    tmp := 1
-    writereg(core.DIETEMPCFG, 1, @tmp)          ' Trigger a measurement
-
-    t := 0
-    readreg(core.DIETEMP_INT, 2, @t)
+    writereg(core.DIETEMPCFG, 1)                ' Trigger a measurement
+    return readreg(core.DIETEMP_INT, 2)
 
 
 PUB temp_word2deg(temp_adc): t | int, fract
@@ -497,23 +455,24 @@ PUB temp_word2deg(temp_adc): t | int, fract
             return FALSE
 
 
-PRI readreg(reg_nr, nr_bytes, ptr_buff) | cmd_pkt, tmp
+PRI readreg(reg_nr, nr_bytes=1): v | cmd_pkt
 ' Read nr_bytes from the device into ptr_buff
     case reg_nr                                 ' validate register #
         $00..$0A, $0C, $0D, $11, $12, $1F..$21, $FE, $FF:
+            v := 0
             cmd_pkt.byte[0] := SLAVE_WR
             cmd_pkt.byte[1] := reg_nr
             i2c.start()
             i2c.wrblock_lsbf(@cmd_pkt, 2)
             i2c.start()
             i2c.write(SLAVE_RD)
-            i2c.rdblock_lsbf(ptr_buff, nr_bytes, i2c.NAK)
+            i2c.rdblock_lsbf(@v, nr_bytes, i2c.NAK)
             i2c.stop()
         other:
             return
 
 
-PRI writereg(reg_nr, nr_bytes, ptr_buff) | cmd_pkt, tmp
+PRI writereg(reg_nr, val, nr_bytes=1) | cmd_pkt, tmp
 ' Write nr_bytes to the device from ptr_buff
     case reg_nr                                 ' validate register #
         $02..$0D, $11, $12, $21:
@@ -521,7 +480,7 @@ PRI writereg(reg_nr, nr_bytes, ptr_buff) | cmd_pkt, tmp
             cmd_pkt.byte[1] := reg_nr
             i2c.start()
             i2c.wrblock_lsbf(@cmd_pkt, 2)
-            i2c.wrblock_lsbf(ptr_buff, nr_bytes)
+            i2c.wrblock_lsbf(@val, nr_bytes)
             i2c.stop()
         other:
             return
